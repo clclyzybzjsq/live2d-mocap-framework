@@ -9,7 +9,8 @@ add_library(lb_win STATIC
 )
 
 target_include_directories(lb_win PUBLIC include)
-target_link_libraries(lb_win PUBLIC lb_core)
+target_link_libraries(lb_win PUBLIC lb_core PRIVATE
+    mf mfplat mfreadwrite mfuuid ole32 oleaut32)
 target_compile_features(lb_win PUBLIC cxx_std_17)
 
 if(MSVC)

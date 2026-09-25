@@ -1,14 +1,21 @@
-# Build script: configure and compile the Windows project skeleton.
+﻿# Build script: configure and compile the Windows project skeleton.
 # Requires CMake, Ninja, MinGW-w64 (UCRT) and Qt6 mingw build -- see docs/assessment-plan.md.
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path -Parent $PSScriptRoot
 
 # ---- locate toolchain (all under D:\deps and user dirs, no admin) ----
-$mingwRoot = "D:\deps\mingw64"
-$gxx = Get-ChildItem $mingwRoot -Recurse -Filter g++.exe -ErrorAction SilentlyContinue |
-    Select-Object -First 1 -ExpandProperty FullName
-if (-not $gxx) { throw "MinGW not found: $mingwRoot (run scripts/bootstrap_toolchain.ps1 first)" }
+# Qt 官方 mingw 构建基于 msvcrt；为消除跨 CRT 堆冲突（0xC0000139 / 堆崩溃），
+# 优先使用 msvcrt 版工具链（D:\deps\mingw_msvcrt），其次 UCRT 版。
+$mingwCandidates = @("D:\deps\mingw_msvcrt", "D:\deps\mingw64")
+$gxx = $null
+foreach ($c in $mingwCandidates) {
+    foreach ($sub in @("$c\mingw64\bin\g++.exe", "$c\bin\g++.exe", "$c\mingw32\bin\g++.exe")) {
+        if (Test-Path $sub) { $gxx = $sub; break }
+    }
+    if ($gxx) { break }
+}
+if (-not $gxx) { throw "MinGW not found ($($mingwCandidates -join ', ')) (run scripts/bootstrap_toolchain.ps1 first)" }
 $mingwBin = Split-Path $gxx
 
 $qt = Get-ChildItem D:\deps\qt -Recurse -Filter qmake.exe -ErrorAction SilentlyContinue |
@@ -33,7 +40,11 @@ if (-not $ninja) { throw "ninja not found (run scripts/bootstrap_toolchain.ps1 f
 $ninjaDir = Split-Path $ninja
 
 # ---- build ----
-$env:PATH = "$mingwBin;$ninjaDir;$env:PATH"
+# 运行时库顺序：mingw (GCC16) 必须在 Qt (GCC13) 之前。
+# 否则加载器取到 Qt bin 里的旧版 libgcc/libstdc++/libwinpthread，
+# 与 GCC16 编译产物不匹配，进程启动即 0xC0000139。
+$qtBin = Split-Path $qt
+$env:PATH = "$mingwBin;$qtBin;$ninjaDir;$env:PATH"
 
 if (-not (Test-Path "$root\build\CMakeCache.txt")) {
     & $cmake -S $root -B "$root\build" -G Ninja `

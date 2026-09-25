@@ -1,4 +1,4 @@
-# One-shot toolchain bootstrap (no admin required, everything on D:\deps and user dirs).
+﻿# One-shot toolchain bootstrap (no admin required, everything on D:\deps and user dirs).
 # Installs: CMake, Ninja, 7-Zip (winget), MinGW-w64 (winlibs), Qt6 mingw (aqt),
 #           Python venv + mediapipe, MediaPipe task models.
 $ErrorActionPreference = 'Stop'

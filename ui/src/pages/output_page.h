@@ -2,7 +2,6 @@
 
 #include <QWidget>
 
-#include "lb/core/floating_window.h"
 #include "lb/core/virtual_camera.h"
 
 class QComboBox;
@@ -19,9 +18,14 @@ class OutputPage final : public QWidget {
 public:
     explicit OutputPage(QWidget* parent = nullptr);
 
+signals:
+    void floating_window_toggled(bool visible);
+    void floating_window_click_through(bool enabled);
+    void floating_window_scale(double scale);
+    void floating_window_opacity(double opacity);
+
 private:
     std::shared_ptr<lb::core::IVirtualCamera> vcam_;
-    std::shared_ptr<lb::core::IFloatingWindow> float_window_;
     QLabel* vcam_status_ = nullptr;
 };
 

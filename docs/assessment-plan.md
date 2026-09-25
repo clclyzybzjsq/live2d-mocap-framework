@@ -313,3 +313,47 @@ Live2D 模型加载（Cubism Core）
 1. 确认第八节决策点（主要是 UI 框架与虚拟摄像头路线）。
 2. 搭建仓库骨架：`core/`（平台无关）、`platform/windows/`、`ui/`，并落地 2.3 的 5 个接口定义。
 3. 一周内做出 M1 最小闭环验证：摄像头出帧 → MediaPipe 出 blendshape → 浮窗里一个示例模型动起来。这一步跑通，项目就进入稳定节奏。
+
+---
+
+## 十、M1 实施记录（v1.2 追加）
+
+> 状态：M1 最小闭环已实现并通过合成信号端到端验证；真实摄像头采集在格式兜底后跑通（见 10.4）。
+
+### 10.1 已落地模块
+
+| 模块 | 位置 | 说明 |
+|---|---|---|
+| IPC v2 共享内存协议 | `core/include/lb/core/ipc_protocol.h` + `inference/protocol.py` | 128B 头部 + 帧缓冲区 + 二进制推理结果（无 JSON）；MAGIC 0x4C425F31，tag `lb_capture_frames` |
+| 推理侧车 | `inference/tracker_server.py` | MediaPipe FaceLandmarker(478 点 + 52 blendshape) + PoseLandmarker；共享内存握手；`--pose-every N` 低频复用；face/pose 双线程并行推理 |
+| 语义求解 | `core/src/solve.cpp` | 头部 yaw/pitch/roll（关键点三角测量）、眼/嘴/眉 blendshape 聚合、躯干位移/倾斜 |
+| 运动管线 | `core/src/motion_pipeline.cpp` | 采集 → 推理 → 平滑 → 回调，统计 FPS/延迟 |
+| Windows 采集 | `platform/windows/src/win_capture_source.cpp` | Media Foundation SourceReader；格式优先级 RGB32 → YUY2 → NV12，原色格式库内自转 BGRA；合成测试信号设备 `__synthetic__` |
+| Windows 推理客户端 | `platform/windows/src/win_face_tracker.cpp` | 共享内存客户端 + 侧车进程拉起（CREATE_NO_WINDOW） |
+| Qt 浮窗 | `ui/src/floating/float_window.cpp` | 无边框置顶透明窗口 + 工具条；QPainter 占位模型（Cubism 集成在 M2+ 进行，当前为语义参数直绘验证） |
+| UI 接线 | `ui/src/main_window.cpp` | 开始/停止动捕、状态栏实时 FPS/延迟、输出页浮窗开关/穿透/缩放/透明度、托盘菜单 |
+| 冒烟工具 | `tools/pipe_smoke.cpp` | 独立 CLI 验证捕获→推理闭环 |
+
+### 10.2 关键指标（合成信号，640×480，并行推理 + pose-every-2）
+
+- 端到端瞬时延迟 28–43ms，窗口帧率约 24 FPS（推理 15.6ms/帧：face 2.0ms + pose 13.3ms）
+- 冷启动首帧 3.9–4.7s（模型加载，M4 启动优化项）
+- 目标 25 FPS / 120ms 为 M4 验收项，当前 640×480 已接近
+
+### 10.3 工具链约束（踩坑记录，务必遵守）
+
+1. **CRT 必须与 Qt 官方 mingw 构建一致（msvcrt）**。用 UCRT 版工具链编译 exe 时，Qt 头内联代码（如 `QByteArray` 析构 → `free`）会用 exe 的 UCRT 堆去释放 Qt DLL（msvcrt 堆）分配的内存，进程启动即崩（`Invalid address specified to RtlFreeHeap`）。工具链统一为 **winlibs msvcrt 版**（`D:\deps\mingw_msvcrt`），`scripts/build.ps1` 已按此优先。
+2. **运行时 PATH 顺序**：MinGW bin（GCC16 运行时）必须在 Qt bin（GCC13 运行时）之前，否则加载器取到旧版 `libgcc_s_seh-1.dll / libstdc++-6.dll / libwinpthread-1.dll`，线程入口解析失败导致 0xC0000139。
+3. 运行 UI 前在 PATH 中带上两个 bin 目录；exe 目录内不宜放 windeployqt 拷贝的 GCC13 运行库（会覆盖 2 的顺序）。
+4. 本机缺少视频格式转换 MFT（`MF_E_TOPO_CODEC_NOT_FOUND`），采集一律取设备原生 NV12/YUY2 并库内自转 BGRA。
+
+### 10.4 真实摄像头（HP Wide Vision 5MP，VID_05C8）
+
+- 仅 NV12 可用：`lb_win: capture format=NV12 640x480`，150 帧全部处理，瞬时延迟 33–45ms，约 15 FPS（NV12 转换 + 推理开销）。
+- 镜头前无人时 `face_detected=0` 属正常（冒烟工具返回 NONZERO 表示"链路 OK 但未检测到人脸"，非失败）。
+
+### 10.5 已知缺口（后续里程碑消化）
+
+- M2：DirectShow 虚拟摄像头（最高风险专项）、Cubism 渲染接入、模型目录/侧车参数做成可配置。
+- M4：25 FPS / 120ms / CPU / 内存 / 启动时间验收压测；打包与自注册。
+- 侧车默认路径（python 解释器/脚本/模型目录）当前为开发期硬编码，环境变量可覆盖。

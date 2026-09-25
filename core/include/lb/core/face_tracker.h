@@ -33,6 +33,9 @@ public:
 
     virtual bool initialize(const InferenceConfig& config) = 0;
     virtual bool process(const FrameView& frame, RawFaceFrame& out) = 0;
+
+    // 释放推理资源（结束边车进程等）。
+    virtual void shutdown() {}
 };
 
 } // namespace lb::core

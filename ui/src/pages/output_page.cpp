@@ -6,7 +6,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
-#include <QScrollArea>
 #include <QVBoxLayout>
 
 #include "lb/core/factory.h"
@@ -18,7 +17,6 @@ namespace lb::ui {
 
 OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     vcam_ = lb::core::create_virtual_camera();
-    float_window_ = lb::core::create_floating_window();
 
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(16, 12, 16, 12);
@@ -58,7 +56,7 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     connect(vcam_switch, &ToggleSwitch::clicked, this, [this](bool on) {
         if (!on) { vcam_->stop(); return; }
         lb::core::VirtualCameraFormat fmt;
-        vcam_->start(fmt); // 桩实现返回失败，状态由 TODO(M2) 接入后驱动
+        vcam_->start(fmt); // 桩实现；M2 接入后驱动
         vcam_status_->setText(vcam_->is_running()
             ? QStringLiteral("运行中")
             : QStringLiteral("未就绪"));
@@ -73,28 +71,27 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     float_layout->setVerticalSpacing(8);
 
     auto* show_switch = new ToggleSwitch(float_box);
+    connect(show_switch, &ToggleSwitch::clicked, this,
+            &OutputPage::floating_window_toggled);
     float_layout->addRow(QStringLiteral("显示"), show_switch);
 
     auto* through_switch = new ToggleSwitch(float_box);
-    connect(through_switch, &ToggleSwitch::clicked, this, [this](bool on) {
-        float_window_->set_click_through(on);
-    });
+    connect(through_switch, &ToggleSwitch::clicked, this,
+            &OutputPage::floating_window_click_through);
     float_layout->addRow(QStringLiteral("点击穿透"), through_switch);
 
     auto* scale = new SliderRow(QStringLiteral("缩放"), 0.2, 1.5, 1.0, float_box);
-    connect(scale, &SliderRow::value_changed, this, [this](double v) {
-        float_window_->set_scale(v);
-    });
+    connect(scale, &SliderRow::value_changed, this,
+            &OutputPage::floating_window_scale);
     float_layout->addRow(QStringLiteral("浮窗"), scale);
 
     auto* opacity = new SliderRow(QStringLiteral("透明度"), 0.1, 1.0, 1.0, float_box);
-    connect(opacity, &SliderRow::value_changed, this, [this](double v) {
-        float_window_->set_opacity(v);
-    });
+    connect(opacity, &SliderRow::value_changed, this,
+            &OutputPage::floating_window_opacity);
     float_layout->addRow(QStringLiteral("浮窗"), opacity);
 
     auto* hint = new QLabel(
-        QStringLiteral("浮窗显示位置与大小在退出时自动记忆"), float_box);
+        QStringLiteral("浮窗位置与大小在退出时自动记忆"), float_box);
     hint->setObjectName("HintText");
     float_layout->addRow(QString(), hint);
     root->addWidget(float_box);

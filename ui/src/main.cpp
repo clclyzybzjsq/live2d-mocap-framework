@@ -1,12 +1,15 @@
 #include <QApplication>
 #include <QFile>
 
+#include "floating/float_window.h"
 #include "main_window.h"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
     QApplication::setApplicationName("livebridge");
     QApplication::setOrganizationName("YunoLab");
+
+    qRegisterMetaType<lb::ui::FrameSnapshot>("FrameSnapshot");
 
     QFile theme(":/theme.qss");
     if (theme.open(QIODevice::ReadOnly | QIODevice::Text)) {

@@ -5,6 +5,8 @@ add_executable(lb_ui
     src/main.cpp
     src/main_window.h
     src/main_window.cpp
+    src/floating/float_window.h
+    src/floating/float_window.cpp
     src/pages/models_page.h
     src/pages/models_page.cpp
     src/pages/mocap_page.h

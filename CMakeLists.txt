@@ -22,3 +22,11 @@ if(LB_BUILD_UI)
         message(STATUS "Qt6 not found - UI target skipped (use scripts/build.ps1)")
     endif()
 endif()
+
+# M1 管线冒烟测试（可选，验证 采集 -> 推理 -> 求解 -> 映射 全链路）
+option(LB_BUILD_SMOKE "Build pipeline smoke test" OFF)
+if(LB_BUILD_SMOKE)
+    add_executable(lb_smoke tools/pipe_smoke.cpp)
+    target_link_libraries(lb_smoke PRIVATE lb_core lb_win)
+    target_compile_features(lb_smoke PRIVATE cxx_std_17)
+endif()
