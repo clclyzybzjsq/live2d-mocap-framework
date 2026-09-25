@@ -37,7 +37,8 @@ struct PipelineStats {
 // 组件经工厂注入（平台无关的编排逻辑），结果帧通过回调送出。
 class MotionPipeline {
 public:
-    using ParamsCallback = std::function<void(const ModelParamList&,
+    using ParamsCallback = std::function<void(const FrameView& frame,
+                                              const ModelParamList&,
                                               const SemanticParams&,
                                               const PipelineStats&)>;
 

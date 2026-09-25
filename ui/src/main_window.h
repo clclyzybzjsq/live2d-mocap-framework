@@ -1,12 +1,14 @@
 #pragma once
 
 #include "lb/core/motion_pipeline.h"
+#include "lb/core/virtual_camera.h"
 
 #include <QMainWindow>
 
 #include <memory>
 
 class QLabel;
+class QAction;
 class QListWidget;
 class QMenu;
 class QPushButton;
@@ -33,6 +35,7 @@ public:
 
 public slots:
     void set_running(bool running);
+    void set_vcam_enabled(bool on);
 
 signals:
     void running_changed(bool running);
@@ -42,7 +45,8 @@ private:
     QWidget* build_status_bar();
     void build_tray();
     void refresh_status();
-    void on_pipeline_frame(const lb::core::ModelParamList& params,
+    void on_pipeline_frame(const lb::core::FrameView& frame,
+                           const lb::core::ModelParamList& params,
                            const lb::core::SemanticParams& semantic,
                            const lb::core::PipelineStats& stats);
 
@@ -68,12 +72,15 @@ private:
     // 托盘
     QSystemTrayIcon* tray_ = nullptr;
     QMenu* tray_menu_ = nullptr;
+    QAction* toggle_vcam_ = nullptr;
 
     // 管线与浮窗
     std::unique_ptr<lb::core::MotionPipeline> pipeline_;
+    std::shared_ptr<lb::core::IVirtualCamera> vcam_;
     FloatWindowWidget* float_window_ = nullptr;
     QTimer* ui_timer_ = nullptr;
     bool running_ = false;
+    bool vcam_enabled_ = false;
 };
 
 } // namespace lb::ui

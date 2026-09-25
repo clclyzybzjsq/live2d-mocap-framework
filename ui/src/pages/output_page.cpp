@@ -8,16 +8,12 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-#include "lb/core/factory.h"
-
 #include "widgets/slider_row.h"
 #include "widgets/toggle_switch.h"
 
 namespace lb::ui {
 
 OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
-    vcam_ = lb::core::create_virtual_camera();
-
     auto* root = new QVBoxLayout(this);
     root->setContentsMargins(16, 12, 16, 12);
     root->setSpacing(10);
@@ -33,34 +29,31 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     vcam_layout->setHorizontalSpacing(10);
     vcam_layout->setVerticalSpacing(8);
 
-    auto* vcam_switch = new ToggleSwitch(vcam_box);
-    vcam_layout->addRow(QStringLiteral("启用"), vcam_switch);
+    vcam_switch_ = new ToggleSwitch(vcam_box);
+    vcam_layout->addRow(QStringLiteral("启用"), vcam_switch_);
 
-    auto* resolution = new QComboBox(vcam_box);
-    resolution->addItems({ QStringLiteral("1920 x 1080"),
-                           QStringLiteral("1280 x 720") });
-    vcam_layout->addRow(QStringLiteral("分辨率"), resolution);
+    vcam_resolution_ = new QComboBox(vcam_box);
+    vcam_resolution_->addItems({ QStringLiteral("1920 x 1080"),
+                                 QStringLiteral("1280 x 720") });
+    vcam_resolution_->setCurrentIndex(1); // 默认 720p
+    vcam_layout->addRow(QStringLiteral("分辨率"), vcam_resolution_);
 
-    auto* fps = new QComboBox(vcam_box);
-    fps->addItems({ QStringLiteral("30"), QStringLiteral("60") });
-    vcam_layout->addRow(QStringLiteral("帧率"), fps);
+    vcam_fps_ = new QComboBox(vcam_box);
+    vcam_fps_->addItems({ QStringLiteral("30"), QStringLiteral("60") });
+    vcam_layout->addRow(QStringLiteral("帧率"), vcam_fps_);
 
-    auto* format = new QComboBox(vcam_box);
-    format->addItems({ QStringLiteral("YUY2"), QStringLiteral("NV12") });
-    vcam_layout->addRow(QStringLiteral("色彩格式"), format);
+    auto* format_label = new QLabel(QStringLiteral("YUY2"), vcam_box);
+    auto* format_row = new QHBoxLayout();
+    format_row->addWidget(format_label);
+    format_row->addStretch(1);
+    vcam_layout->addRow(QStringLiteral("色彩格式"), format_row);
 
     vcam_status_ = new QLabel(vcam_box);
     vcam_status_->setObjectName("HintText");
     vcam_layout->addRow(QStringLiteral("设备状态"), vcam_status_);
 
-    connect(vcam_switch, &ToggleSwitch::clicked, this, [this](bool on) {
-        if (!on) { vcam_->stop(); return; }
-        lb::core::VirtualCameraFormat fmt;
-        vcam_->start(fmt); // 桩实现；M2 接入后驱动
-        vcam_status_->setText(vcam_->is_running()
-            ? QStringLiteral("运行中")
-            : QStringLiteral("未就绪"));
-    });
+    connect(vcam_switch_, &ToggleSwitch::clicked, this,
+            &OutputPage::virtual_camera_toggled);
     root->addWidget(vcam_box);
 
     // ---- 通道 B：桌面浮窗 ----
@@ -97,10 +90,23 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     root->addWidget(float_box);
 
     root->addStretch(1);
+}
 
-    vcam_status_->setText(vcam_->is_registered()
-        ? QStringLiteral("就绪")
-        : QStringLiteral("未就绪"));
+lb::core::VirtualCameraFormat OutputPage::vcam_config() const {
+    lb::core::VirtualCameraFormat fmt;
+    fmt.width = vcam_resolution_->currentIndex() == 0 ? 1920 : 1280;
+    fmt.height = vcam_resolution_->currentIndex() == 0 ? 1080 : 720;
+    fmt.fps = vcam_fps_->currentIndex() == 0 ? 30 : 60;
+    fmt.preferred_format = lb::core::PixelFormat::YUY2;
+    return fmt;
+}
+
+void OutputPage::set_vcam_checked(bool on) {
+    vcam_switch_->setChecked(on);
+}
+
+void OutputPage::set_vcam_status(const QString& text) {
+    vcam_status_->setText(text);
 }
 
 } // namespace lb::ui

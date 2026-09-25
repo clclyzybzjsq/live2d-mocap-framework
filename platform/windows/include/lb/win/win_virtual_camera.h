@@ -1,16 +1,20 @@
 #pragma once
 
+#include <windows.h>
+#include <atomic>
+#include <mutex>
+
 #include "lb/core/virtual_camera.h"
 
 namespace lb::win {
 
-// Windows 虚拟摄像头实现。TODO(M2)：DirectShow 用户态 filter +
-// 共享内存喂帧；首次运行自动注册、每次启动自愈（方案 4.0 零配置）。
-// 当前为桩实现，接口形状已定。
+// Windows 虚拟摄像头实现：DirectShow 用户态 filter（lb_vcam_filter.dll）+
+// 共享内存（lb_vcam_frames）喂帧。首次运行自动注册（HKCU 用户态）、
+// 每次启动自愈重注册（方案 4.0 零配置）。
 class WinVirtualCamera final : public lb::core::IVirtualCamera {
 public:
     WinVirtualCamera() = default;
-    ~WinVirtualCamera() override = default;
+    ~WinVirtualCamera() override { stop(); }
 
     bool is_registered() const override;
     bool ensure_registered() override;
@@ -22,9 +26,15 @@ public:
     bool is_running() const override;
     bool has_consumer() const override;
 
+    // 测试/卸载辅助：调用 filter 的 DllUnregisterServer
+    void unregister_device();
+
 private:
     lb::core::VirtualCameraFormat format_;
-    bool running_ = false;
+    std::atomic<bool> running_{false};
+    HANDLE map_ = nullptr;
+    void* view_ = nullptr;
+    mutable std::mutex mutex_;
 };
 
 } // namespace lb::win

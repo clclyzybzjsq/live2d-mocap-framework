@@ -102,7 +102,7 @@ void MotionPipeline::handle_frame(const FrameView& frame) {
     const ModelParamList params = apply_mapping(semantic, config_.mapping);
     if (callback_) {
         std::lock_guard<std::mutex> lock(stats_mutex_);
-        callback_(params, semantic, stats_);
+        callback_(frame, params, semantic, stats_);
     }
 }
 

@@ -97,6 +97,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(output_page_, &OutputPage::floating_window_opacity, this,
             [this](double opacity) { float_window_->set_opacity(opacity); });
 
+    // 虚拟摄像头：开关 -> 注册/启动（实例由 MainWindow 持有，管线线程喂帧）
+    connect(output_page_, &OutputPage::virtual_camera_toggled, this,
+            &MainWindow::set_vcam_enabled);
+
     build_tray();
 
     ui_timer_ = new QTimer(this);
@@ -202,7 +206,10 @@ void MainWindow::build_tray() {
 
     auto* toggle_vcam = tray_menu_->addAction(QStringLiteral("开关虚拟摄像头"));
     toggle_vcam->setCheckable(true);
-    // TODO(M2): 接入虚拟摄像头开关。
+    connect(toggle_vcam, &QAction::toggled, this, &MainWindow::set_vcam_enabled);
+    connect(this, &MainWindow::running_changed, this,
+            [toggle_vcam](bool) { /* 状态由 set_vcam_enabled 统一同步 */ });
+    toggle_vcam_ = toggle_vcam;
 
     tray_menu_->addSeparator();
     auto* quit = tray_menu_->addAction(QStringLiteral("退出"));
@@ -247,10 +254,11 @@ void MainWindow::set_running(bool running) {
     }
 
     const bool ok = pipeline_->start(
-        [this](const lb::core::ModelParamList& params,
+        [this](const lb::core::FrameView& frame,
+               const lb::core::ModelParamList& params,
                const lb::core::SemanticParams& semantic,
                const lb::core::PipelineStats& stats) {
-            on_pipeline_frame(params, semantic, stats);
+            on_pipeline_frame(frame, params, semantic, stats);
         });
     if (!ok) {
         set_running(false);
@@ -261,6 +269,40 @@ void MainWindow::set_running(bool running) {
     }
 
     status_camera_->setText(QStringLiteral("摄像头: 已连接"));
+}
+
+void MainWindow::set_vcam_enabled(bool on) {
+    if (vcam_enabled_ == on && on == (vcam_ && vcam_->is_running())) {
+        return;
+    }
+    vcam_enabled_ = on;
+
+    if (!on) {
+        if (vcam_) vcam_->stop();
+        output_page_->set_vcam_checked(false);
+        if (toggle_vcam_) toggle_vcam_->setChecked(false);
+        output_page_->set_vcam_status(QStringLiteral("已停止"));
+        return;
+    }
+
+    if (!vcam_) vcam_ = lb::core::create_virtual_camera();
+    if (!vcam_->is_registered() && !vcam_->ensure_registered()) {
+        vcam_enabled_ = false;
+        output_page_->set_vcam_checked(false);
+        if (toggle_vcam_) toggle_vcam_->setChecked(false);
+        output_page_->set_vcam_status(
+            QStringLiteral("需一次管理员权限注册（运行 scripts/register_vcam.ps1）"));
+        return;
+    }
+
+    const bool ok = vcam_->start(output_page_->vcam_config());
+    output_page_->set_vcam_status(ok ? QStringLiteral("运行中")
+                                     : QStringLiteral("启动失败"));
+    if (!ok) {
+        vcam_enabled_ = false;
+        output_page_->set_vcam_checked(false);
+        if (toggle_vcam_) toggle_vcam_->setChecked(false);
+    }
 }
 
 void MainWindow::refresh_status() {
@@ -276,9 +318,16 @@ void MainWindow::refresh_status() {
     mocap_page_->set_confidence(stats.face_detected ? 100 : 0);
 }
 
-void MainWindow::on_pipeline_frame(const lb::core::ModelParamList& params,
+void MainWindow::on_pipeline_frame(const lb::core::FrameView& frame,
+                                   const lb::core::ModelParamList& params,
                                    const lb::core::SemanticParams& semantic,
                                    const lb::core::PipelineStats& stats) {
+    // 虚拟摄像头喂帧：管线回调线程直推（vcam 内部有锁）
+    // 注：回调携带的 frame 为管线内部分配的缓冲区，拷贝到共享内存后即可释放
+    if (vcam_ && vcam_->is_running()) {
+        vcam_->push_frame(frame);
+    }
+
     FrameSnapshot snap;
     snap.params = params;
     snap.semantic = semantic;
