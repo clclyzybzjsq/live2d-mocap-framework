@@ -1,0 +1,240 @@
+/* Live Bridge UI 主题 -- 黑色系、扁平、低圆角。
+   配色与规范见 docs/assessment-plan.md 第七节。
+   硬性约束：全应用不含任何 emoji / 表情符号。 */
+
+QMainWindow, QDialog {
+    background-color: #0F1115;
+}
+
+QWidget {
+    color: #E8EAED;
+    font-size: 13px;
+}
+
+QLabel {
+    background: transparent;
+}
+
+/* ---- 顶栏 ---- */
+#TopBar {
+    background-color: #14171C;
+    border-bottom: 1px solid #1C2026;
+}
+#StatusDot {
+    background-color: #6B7280;
+    border-radius: 2px;
+}
+#StatusText {
+    color: #9BA1A8;
+    font-size: 12px;
+}
+#ModelName {
+    color: #E8EAED;
+    font-size: 13px;
+}
+#StartButton {
+    background-color: #1A1E24;
+    border: 1px solid #232830;
+    border-radius: 2px;
+    padding: 6px 18px;
+    color: #E8EAED;
+}
+#StartButton:hover {
+    border-color: #4DB8FF;
+}
+#StartButton:focus {
+    border-color: #4DB8FF;
+}
+#StartButton:checked {
+    background-color: #3FBF7F;
+    border-color: #3FBF7F;
+    color: #0F1115;
+    font-weight: 600;
+}
+
+/* ---- 左导航 ---- */
+#NavList {
+    background-color: #14171C;
+    border: none;
+    border-right: 1px solid #1C2026;
+    outline: none;
+    padding-top: 8px;
+}
+#NavList::item {
+    height: 34px;
+    padding-left: 14px;
+    color: #9BA1A8;
+    border-left: 2px solid transparent;
+}
+#NavList::item:hover {
+    background-color: #1A1E24;
+    color: #E8EAED;
+}
+#NavList::item:selected {
+    background-color: #1A1E24;
+    color: #F2F4F6;
+    border-left: 2px solid #4DB8FF;
+}
+
+/* ---- 页面标题与提示 ---- */
+#PageTitle {
+    font-size: 16px;
+    font-weight: 600;
+    color: #F2F4F6;
+}
+#HintText {
+    color: #6B7280;
+    font-size: 12px;
+}
+
+/* ---- 分组 ---- */
+QGroupBox {
+    background-color: #14171C;
+    border: 1px solid #1C2026;
+    border-radius: 2px;
+    margin-top: 10px;
+    padding: 10px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+    color: #9BA1A8;
+    font-size: 12px;
+}
+
+/* ---- 按钮 ---- */
+QPushButton {
+    background-color: #1A1E24;
+    border: 1px solid #232830;
+    border-radius: 2px;
+    padding: 5px 14px;
+    color: #E8EAED;
+}
+QPushButton:hover {
+    border-color: #4DB8FF;
+}
+QPushButton:pressed {
+    background-color: #232830;
+}
+QPushButton:disabled {
+    color: #6B7280;
+    border-color: #1C2026;
+}
+
+/* ---- 输入控件 ---- */
+QComboBox, QLineEdit, QSpinBox {
+    background-color: #1A1E24;
+    border: 1px solid #232830;
+    border-radius: 2px;
+    padding: 4px 8px;
+    selection-background-color: #4DB8FF;
+    selection-color: #0F1115;
+}
+QComboBox:hover, QLineEdit:hover, QSpinBox:hover {
+    border-color: #4DB8FF;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 18px;
+}
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #9BA1A8;
+    margin-right: 6px;
+}
+QComboBox QAbstractItemView {
+    background-color: #1A1E24;
+    border: 1px solid #232830;
+    selection-background-color: #2A3038;
+    selection-color: #E8EAED;
+    outline: none;
+}
+
+/* ---- 列表 ---- */
+#ModelList {
+    background-color: #1A1E24;
+    border: 1px solid #232830;
+    border-radius: 2px;
+    outline: none;
+}
+#ModelList::item {
+    height: 40px;
+    padding-left: 8px;
+}
+#ModelList::item:selected {
+    background-color: #232830;
+    border-left: 2px solid #4DB8FF;
+}
+
+/* ---- 滑杆 ---- */
+QSlider::groove:horizontal {
+    height: 2px;
+    background: #232830;
+    border: none;
+}
+QSlider::sub-page:horizontal {
+    background: #4DB8FF;
+}
+QSlider::handle:horizontal {
+    width: 10px;
+    height: 10px;
+    margin: -4px 0;
+    border-radius: 2px;
+    background: #E8EAED;
+}
+QSlider::handle:horizontal:hover {
+    background: #4DB8FF;
+}
+#SliderValue {
+    color: #9BA1A8;
+    font-size: 12px;
+    font-family: "Cascadia Mono", "Consolas", monospace;
+}
+
+/* ---- 状态栏 ---- */
+#StatusBar {
+    background-color: #14171C;
+    border-top: 1px solid #1C2026;
+}
+#StatusBarText {
+    color: #9BA1A8;
+    font-size: 12px;
+}
+
+/* ---- 进度条（置信度） ---- */
+QProgressBar {
+    background-color: #1A1E24;
+    border: 1px solid #232830;
+    border-radius: 2px;
+    height: 8px;
+    text-align: center;
+    color: #9BA1A8;
+    font-size: 11px;
+}
+QProgressBar::chunk {
+    background-color: #4DB8FF;
+    border-radius: 1px;
+}
+
+/* ---- 滚动条 ---- */
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+}
+QScrollBar::handle:vertical {
+    background: #2A3038;
+    border-radius: 2px;
+    min-height: 24px;
+}
+QScrollBar::handle:vertical:hover {
+    background: #4DB8FF;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
