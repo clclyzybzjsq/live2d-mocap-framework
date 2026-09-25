@@ -81,11 +81,18 @@ void category_subkey(wchar_t* buf, size_t size) {
     swprintf(buf, size, L"Software\\Classes\\MediaCategories\\{860BB310-5D01-11D0-BD3B-00A0C911CE86}\\{2A17E0B2-2A8C-4E4A-9E5C-8B4A6D2F1C55}");
 }
 
+// ---- DLL 自身句柄（DllRegisterServer 运行时宿主是 regsvr32.exe，
+//      必须用本 DLL 的 HINSTANCE 才能取到 filter DLL 的真实路径） ----
+static HMODULE g_hInst = nullptr;
+
 } // namespace
 
 extern "C" {
 
-BOOL WINAPI DllMain(HINSTANCE, DWORD, LPVOID) { return TRUE; }
+BOOL WINAPI DllMain(HINSTANCE hinst, DWORD, LPVOID) {
+    g_hInst = hinst;
+    return TRUE;
+}
 
 __declspec(dllexport) HRESULT WINAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {
     if (rclsid != CLSID_LBVcam) return CLASS_E_CLASSNOTAVAILABLE;
@@ -99,26 +106,28 @@ __declspec(dllexport) HRESULT WINAPI DllCanUnloadNow(void) { return S_FALSE; }
 
 __declspec(dllexport) HRESULT WINAPI DllRegisterServer(void) {
     wchar_t dll_path[MAX_PATH] = {0};
-    GetModuleFileNameW(nullptr, dll_path, MAX_PATH);
+    GetModuleFileNameW(g_hInst, dll_path, MAX_PATH);
 
-    // 标准注册目标：HKLM（需要一次管理员权限，见 scripts/register_vcam.ps1）
-    const HKEY root = HKEY_LOCAL_MACHINE;
+    // 1) HKCU 注册：非管理员总能成功；CoCreateInstance / 同用户 COM 可见
     wchar_t key[MAX_PATH] = {0};
     clsid_subkey(key, MAX_PATH, L"\\InprocServer32");
-    if (!write_reg_string(root, key, nullptr, dll_path)) return E_ACCESSDENIED;
-    if (!write_reg_string(root, key, L"ThreadingModel", L"Both")) return E_ACCESSDENIED;
-    clsid_subkey(key, MAX_PATH, L"\\FriendlyName");
-    if (!write_reg_string(root, key, nullptr, kFriendlyName)) return E_ACCESSDENIED;
-
-    category_subkey(key, MAX_PATH);
-    if (!write_reg_string(root, key, nullptr, kFriendlyName)) return E_ACCESSDENIED;
-
-    // 冗余写 HKCU（对枚举无效，但便于其它工具查询；失败不致命）
-    clsid_subkey(key, MAX_PATH, L"\\InprocServer32");
-    write_reg_string(HKEY_CURRENT_USER, key, nullptr, dll_path);
+    if (!write_reg_string(HKEY_CURRENT_USER, key, nullptr, dll_path)) return E_FAIL;
     write_reg_string(HKEY_CURRENT_USER, key, L"ThreadingModel", L"Both");
     clsid_subkey(key, MAX_PATH, L"\\FriendlyName");
     write_reg_string(HKEY_CURRENT_USER, key, nullptr, kFriendlyName);
+    category_subkey(key, MAX_PATH);
+    write_reg_string(HKEY_CURRENT_USER, key, nullptr, kFriendlyName);
+
+    // 2) HKLM 注册：DirectShow 设备枚举（ICreateDevEnum）只读 HKLM，需管理员；
+    //    失败不致命（应用内自动提权时成功）
+    const HKEY root = HKEY_LOCAL_MACHINE;
+    clsid_subkey(key, MAX_PATH, L"\\InprocServer32");
+    if (!write_reg_string(root, key, nullptr, dll_path)) return S_OK;
+    write_reg_string(root, key, L"ThreadingModel", L"Both");
+    clsid_subkey(key, MAX_PATH, L"\\FriendlyName");
+    if (!write_reg_string(root, key, nullptr, kFriendlyName)) return S_OK;
+    category_subkey(key, MAX_PATH);
+    write_reg_string(root, key, nullptr, kFriendlyName);
     return S_OK;
 }
 
