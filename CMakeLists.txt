@@ -47,4 +47,8 @@ if(LB_BUILD_VCAM_FLOW)
         # MinGW 默认导出全部符号；进程内系统 COM（quartz）会绑定到错误导出导致崩溃
         target_link_options(lb_vcam_flow PRIVATE "-Wl,--exclude-all-symbols")
     endif()
+
+    add_executable(lb_vcam_write tools/vcam_write_test.cpp)
+    target_link_libraries(lb_vcam_write PRIVATE lb_core lb_win)
+    target_compile_features(lb_vcam_write PRIVATE cxx_std_17)
 endif()

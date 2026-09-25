@@ -1,11 +1,14 @@
 #include "lb/win/win_virtual_camera.h"
 
 #include <windows.h>
+#include <shellapi.h>
 #include <winreg.h>
 
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <string>
+#include <vector>
 
 #include "lb/core/vcam_protocol.h"
 
@@ -66,6 +69,41 @@ bool call_filter_dll(const char* proc_name) {
     return true;
 }
 
+// 自动提权注册：ShellExecuteExW(runas) 调 regsvr32 /s <dll>。
+// 用户只需确认一次 UAC；注册写 HKLM 后消费程序（ffmpeg/OBS/Teams）可见。
+// 调用方注意：UAC 确认前会阻塞（模态），应在后台线程或一次性路径执行。
+bool elevated_register() {
+    wchar_t exe_dir[MAX_PATH] = {0};
+    GetModuleFileNameW(nullptr, exe_dir, MAX_PATH);
+    wchar_t* slash = wcsrchr(exe_dir, L'\\');
+    if (!slash) return false;
+    *(slash + 1) = L'\0';
+    std::wstring dll_path = std::wstring(exe_dir) + L"lb_vcam_filter.dll";
+
+    std::wstring args = L"/s \"" + dll_path + L"\"";
+    SHELLEXECUTEINFOW sei{};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = L"runas"; // 提权
+    sei.lpFile = L"regsvr32";
+    sei.lpParameters = args.c_str();
+    sei.nShow = SW_HIDE;
+    if (!ShellExecuteExW(&sei)) {
+        std::fprintf(stderr, "lb_win: elevated register failed (cancelled? err=%lu)\n",
+                     GetLastError());
+        return false;
+    }
+    WaitForSingleObject(sei.hProcess, 30000);
+    DWORD code = 0;
+    GetExitCodeProcess(sei.hProcess, &code);
+    CloseHandle(sei.hProcess);
+    if (code != 0) {
+        std::fprintf(stderr, "lb_win: elevated regsvr32 exit=%lu\n", code);
+        return false;
+    }
+    return true;
+}
+
 } // namespace
 
 bool WinVirtualCamera::is_registered() const {
@@ -75,14 +113,13 @@ bool WinVirtualCamera::is_registered() const {
 bool WinVirtualCamera::ensure_registered() {
     if (clsid_registered()) return true;
     std::fprintf(stderr,
-                 "lb_win: virtual camera not registered; need one elevated "
-                 "registration (run scripts/register_vcam.ps1 as admin)\n");
-    // 尽力尝试：当前进程若无管理员权限会失败，返回 false 由 UI 提示
-    if (!call_filter_dll("DllRegisterServer")) {
-        std::fprintf(stderr, "lb_win: DllRegisterServer failed (likely not elevated)\n");
-        return false;
-    }
-    return clsid_registered();
+                 "lb_win: virtual camera not registered; attempting registration\n");
+    // 1) 当前权限直注册（应用以管理员运行时成功）
+    if (call_filter_dll("DllRegisterServer") && clsid_registered()) return true;
+    // 2) 自动提权一次（用户确认 UAC；注册写 HKLM）
+    if (elevated_register() && clsid_registered()) return true;
+    std::fprintf(stderr, "lb_win: vcam registration failed (need elevation once)\n");
+    return false;
 }
 
 bool WinVirtualCamera::start(const lb::core::VirtualCameraFormat& format) {
