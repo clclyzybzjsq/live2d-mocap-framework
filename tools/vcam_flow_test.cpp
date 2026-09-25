@@ -17,10 +17,12 @@ static const CLSID CLSID_LBVcam = {0x2a17e0b2, 0x2a8c, 0x4e4a,
 static const CLSID CLSID_NullRendererX = {0xC1F400A0, 0x3F08, 0x11D0,
                                           {0xAD, 0x4B, 0x00, 0xC0, 0x4F, 0xD8, 0xD7, 0x3A}};
 static int argc_use_nr = 0;
+static int pmt_null_mode = 0;
 
 // ---- 测试 sink：input pin + IMemInputPin，Receive 计数 ----
 class TestSinkPin final : public IPin, public IMemInputPin {
 public:
+    explicit TestSinkPin(IBaseFilter* sink) : owner_sink_(sink) {}
     TestSinkPin() = default;
 
     STDMETHODIMP QueryInterface(REFIID riid, void** ppv) {
@@ -61,7 +63,9 @@ public:
     STDMETHODIMP ConnectionMediaType(AM_MEDIA_TYPE*) { return VFW_E_NOT_CONNECTED; }
     STDMETHODIMP QueryPinInfo(PIN_INFO* p) {
         if (!p) return E_POINTER;
-        p->pFilter = nullptr;
+        // pFilter 必须是所属 filter 实例（石英用其验证 pin 归属）
+        p->pFilter = static_cast<IBaseFilter*>(owner_sink_);
+        if (p->pFilter) p->pFilter->AddRef();
         p->dir = PINDIR_INPUT;
         wcscpy(p->achName, L"Input");
         return S_OK;
@@ -128,13 +132,14 @@ public:
     std::atomic<unsigned long long> frames_{0};
 
 private:
+    IBaseFilter* owner_sink_ = nullptr;
     ULONG refs_ = 1;
     unsigned int last_sum_ = 0;
 };
 
 class TestSink final : public IBaseFilter {
 public:
-    TestSink() = default;
+    TestSink() : pin_(this) {}
     ~TestSink() { pin_.Release(); }
 
     STDMETHODIMP QueryInterface(REFIID riid, void** ppv) {
@@ -199,15 +204,23 @@ public:
     STDMETHODIMP QueryFilterInfo(FILTER_INFO* p) {
         if (!p) return E_POINTER;
         wcscpy(p->achName, L"TestSink");
-        p->pGraph = nullptr;
+        // 石英用 pGraph 校验 pin 是否在图中（ConnectDirect 前置）
+        p->pGraph = graph_;
+        if (graph_) graph_->AddRef();
         return S_OK;
     }
-    STDMETHODIMP JoinFilterGraph(IFilterGraph*, LPCWSTR) { return S_OK; }
+    STDMETHODIMP JoinFilterGraph(IFilterGraph* g, LPCWSTR) {
+        if (graph_) graph_->Release();
+        graph_ = g;
+        if (graph_) graph_->AddRef();
+        return S_OK;
+    }
     STDMETHODIMP QueryVendorInfo(LPWSTR*) { return E_NOTIMPL; }
 
     TestSinkPin pin_;
 
 private:
+    IFilterGraph* graph_ = nullptr;
     ULONG refs_ = 1;
 };
 
@@ -419,11 +432,14 @@ int run_graph() {
     vih.bmiHeader.biCompression = MAKEFOURCC('U', 'Y', 'V', 'Y');
     vih.bmiHeader.biSizeImage = 640u * 480u * 2u;
     mt.cbFormat = sizeof(VIDEOINFOHEADER);
-    mt.pbFormat = reinterpret_cast<BYTE*>(&vih);
+    BYTE* fmt_buf = reinterpret_cast<BYTE*>(CoTaskMemAlloc(sizeof(VIDEOINFOHEADER)));
+    memcpy(fmt_buf, &vih, sizeof(vih));
+    mt.pbFormat = fmt_buf;
     mt.lSampleSize = 640u * 480u * 2u;
     mt.bFixedSizeSamples = TRUE;
 
-    hr = graph->ConnectDirect(src_pin, sink_pin, &mt);
+    hr = graph->ConnectDirect(src_pin, sink_pin, pmt_null_mode ? nullptr : &mt);
+    CoTaskMemFree(fmt_buf); // 石英应深拷贝；连接后由调用者释放
     if (FAILED(hr)) {
         printf("FAIL: ConnectDirect hr=0x%08lX\n", static_cast<unsigned long>(hr));
         return 1;
@@ -469,6 +485,69 @@ int main(int argc, char** argv) {
     printf("vcam flow test start\n");
 
     // --obs：对照实验，用已注册的 OBS Virtual Camera 走石英图
+    if (argc > 1 && strcmp(argv[1], "--evr") == 0) {
+        // 用系统 EVR（注册完好）充当 sink：区分 filter 本身与 TestSink 残缺
+        static const CLSID kEVR = {0xFA10746C, 0x9B63, 0x4b6c,
+                                   {0xBC, 0x49, 0xFC, 0x30, 0x0E, 0xA5, 0xF2, 0x56}};
+        IBaseFilter* src = nullptr;
+        HRESULT hr = CoCreateInstance(CLSID_LBVcam, nullptr, CLSCTX_INPROC_SERVER,
+                                      IID_IBaseFilter, reinterpret_cast<void**>(&src));
+        if (FAILED(hr)) return 1;
+        IBaseFilter* evr = nullptr;
+        hr = CoCreateInstance(kEVR, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_IBaseFilter, reinterpret_cast<void**>(&evr));
+        if (FAILED(hr)) {
+            printf("FAIL: EVR CoCreateInstance hr=0x%08lX\n",
+                   static_cast<unsigned long>(hr));
+            return 1;
+        }
+        IGraphBuilder* graph = nullptr;
+        hr = CoCreateInstance(CLSID_FilterGraph, nullptr, CLSCTX_INPROC_SERVER,
+                              IID_IGraphBuilder, reinterpret_cast<void**>(&graph));
+        if (FAILED(hr)) return 1;
+        graph->AddFilter(src, L"LBVcamSource");
+        graph->AddFilter(evr, L"EVR");
+        IPin* src_pin = nullptr;
+        src->FindPin(L"Output", &src_pin);
+        IPin* evr_pin = nullptr;
+        IEnumPins* ep = nullptr;
+        evr->EnumPins(&ep);
+        PIN_INFO pi;
+        while (ep && ep->Next(1, &evr_pin, nullptr) == S_OK) {
+            evr_pin->QueryPinInfo(&pi);
+            if (pi.pFilter) pi.pFilter->Release();
+            if (pi.dir == PINDIR_INPUT) break;
+            evr_pin->Release();
+            evr_pin = nullptr;
+        }
+        if (ep) ep->Release();
+        if (!evr_pin) {
+            printf("FAIL: EVR input pin not found\n");
+            return 1;
+        }
+        hr = graph->ConnectDirect(src_pin, evr_pin, nullptr);
+        printf("EVR ConnectDirect hr=0x%08lX\n", static_cast<unsigned long>(hr));
+        if (SUCCEEDED(hr)) {
+            IMediaControl* ctl = nullptr;
+            graph->QueryInterface(IID_IMediaControl, reinterpret_cast<void**>(&ctl));
+            hr = ctl->Run();
+            printf("EVR Run hr=0x%08lX\n", static_cast<unsigned long>(hr));
+            if (SUCCEEDED(hr)) {
+                Sleep(1500);
+                ctl->Stop();
+                printf("EVR graph ran ok\n");
+            }
+            ctl->Release();
+        }
+        src_pin->Release();
+        if (evr_pin) evr_pin->Release();
+        src->Release();
+        evr->Release();
+        graph->Release();
+        CoUninitialize();
+        return SUCCEEDED(hr) ? 0 : 1;
+    }
+
     if (argc > 1 && strcmp(argv[1], "--obs") == 0) {
         // {A3FCE0F5-3493-419F-958A-ABA1250EC20B}
         static const CLSID kOBSVcam = {0xa3fce0f5, 0x3493, 0x419f,
@@ -513,10 +592,12 @@ int main(int argc, char** argv) {
     }
 
     argc_use_nr = 0;
+    pmt_null_mode = 0;
     bool graph_mode = false;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--graph") == 0) graph_mode = true;
         if (strcmp(argv[i], "--nr") == 0) argc_use_nr = 1;
+        if (strcmp(argv[i], "--pmt-null") == 0) pmt_null_mode = 1;
     }
     const int rc = graph_mode ? run_graph() : run_manual();
     CoUninitialize();

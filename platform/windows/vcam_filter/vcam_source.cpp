@@ -362,6 +362,7 @@ STDMETHODIMP LBVcamPushSource::GetClassID(CLSID* pClsID) {
 
 // -- IMediaFilter --
 STDMETHODIMP LBVcamPushSource::Stop() {
+    std::fprintf(stderr, "[lb_vcam] filter Stop\n");
     std::lock_guard<std::mutex> lock(state_lock_);
     if (state_ == State_Stopped) return S_OK;
     state_ = State_Stopped;
@@ -370,11 +371,13 @@ STDMETHODIMP LBVcamPushSource::Stop() {
     return S_OK;
 }
 STDMETHODIMP LBVcamPushSource::Pause() {
+    std::fprintf(stderr, "[lb_vcam] filter Pause\n");
     std::lock_guard<std::mutex> lock(state_lock_);
     state_ = State_Paused;
     return S_OK;
 }
 STDMETHODIMP LBVcamPushSource::Run(REFERENCE_TIME tStart) {
+    std::fprintf(stderr, "[lb_vcam] filter Run\n");
     std::lock_guard<std::mutex> lock(state_lock_);
     if (state_ == State_Running) return S_OK;
     state_ = State_Running;
@@ -598,6 +601,8 @@ const uint8_t* LBVcamOutputPin::shm_frame() const {
 }
 
 STDMETHODIMP LBVcamOutputPin::Connect(IPin* pReceivePin, const AM_MEDIA_TYPE* pmt) {
+    std::fprintf(stderr, "[lb_vcam] Connect enter (pmt=%p)\n",
+                 static_cast<const void*>(pmt));
     if (!pReceivePin) return E_POINTER;
     std::lock_guard<std::mutex> lock(lock_);
     if (connected_) return VFW_E_ALREADY_CONNECTED;
@@ -613,14 +618,20 @@ STDMETHODIMP LBVcamOutputPin::Connect(IPin* pReceivePin, const AM_MEDIA_TYPE* pm
     } else {
         make_video_type(&type, w, h);
     }
+    std::fprintf(stderr, "[lb_vcam] Connect: type majortype=%d subtype=%d\n",
+                 type.majortype.Data1, type.subtype.Data1);
     // 2) 检查下游 QueryAccept
     HRESULT hr = pReceivePin->QueryAccept(&type);
+    std::fprintf(stderr, "[lb_vcam] Connect: QueryAccept hr=0x%08lX\n",
+                 static_cast<unsigned long>(hr));
     if (FAILED(hr)) {
         free_media_type(&type);
         return VFW_E_TYPE_NOT_ACCEPTED;
     }
     // 3) 通知连接
     hr = pReceivePin->ReceiveConnection(static_cast<IPin*>(this), &type);
+    std::fprintf(stderr, "[lb_vcam] Connect: ReceiveConnection hr=0x%08lX\n",
+                 static_cast<unsigned long>(hr));
     if (FAILED(hr)) {
         free_media_type(&type);
         return hr;
@@ -631,9 +642,14 @@ STDMETHODIMP LBVcamOutputPin::Connect(IPin* pReceivePin, const AM_MEDIA_TYPE* pm
     // 4) 分配器：优先下游提供；缺省时自建标准内存分配器
     IMemInputPin* mem_in = nullptr;
     hr = pReceivePin->QueryInterface(IID_IMemInputPin, reinterpret_cast<void**>(&mem_in));
-    if (FAILED(hr) || !mem_in) return VFW_E_NO_ALLOCATOR;
+    if (FAILED(hr) || !mem_in) {
+        std::fprintf(stderr, "[lb_vcam] Connect: no IMemInputPin\n");
+        return VFW_E_NO_ALLOCATOR;
+    }
     IMemAllocator* alloc = nullptr;
     hr = mem_in->GetAllocator(&alloc);
+    std::fprintf(stderr, "[lb_vcam] Connect: GetAllocator hr=0x%08lX\n",
+                 static_cast<unsigned long>(hr));
     if (FAILED(hr) || !alloc) {
         // 自建内置内存分配器（不依赖系统 quartz.dll）
         alloc = new VcamAllocator();
@@ -657,6 +673,7 @@ STDMETHODIMP LBVcamOutputPin::Connect(IPin* pReceivePin, const AM_MEDIA_TYPE* pm
     connected_ = true;
     acquire_shm();
     on_connected();
+    std::fprintf(stderr, "[lb_vcam] Connect: S_OK\n");
     return S_OK;
 }
 
@@ -737,12 +754,17 @@ STDMETHODIMP LBVcamOutputPin::QueryId(LPWSTR* id) {
     return S_OK;
 }
 STDMETHODIMP LBVcamOutputPin::QueryAccept(const AM_MEDIA_TYPE* pmt) {
+    std::fprintf(stderr, "[lb_vcam] QueryAccept (maj=%d sub=%d fmtt=%d)\n",
+                 pmt ? pmt->majortype.Data1 : -1,
+                 pmt ? pmt->subtype.Data1 : -1,
+                 pmt ? pmt->formattype.Data1 : -1);
     if (!pmt) return E_POINTER;
     if (pmt->majortype == MEDIATYPE_Video && pmt->subtype == MEDIASUBTYPE_YUY2)
         return S_OK;
     return S_FALSE;
 }
 STDMETHODIMP LBVcamOutputPin::EnumMediaTypes(IEnumMediaTypes** ppEnum) {
+    std::fprintf(stderr, "[lb_vcam] EnumMediaTypes\n");
     if (!ppEnum) return E_POINTER;
     int w = kDefaultW, h = kDefaultH;
     read_shm_size(shm_header(), &w, &h);
