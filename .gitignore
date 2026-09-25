@@ -19,5 +19,11 @@ __pycache__/
 .venv/
 venv/
 
+# tool logs
+aqtinstall.log
+
+# downloadable models (use inference/fetch_models.ps1)
+inference/models/
+
 # local toolchain (this repo never vendors tools)
 third_party/
