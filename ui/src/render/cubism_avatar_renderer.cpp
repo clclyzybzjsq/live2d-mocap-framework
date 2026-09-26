@@ -157,6 +157,17 @@ CubismAvatarRenderer::~CubismAvatarRenderer() {
 bool CubismAvatarRenderer::ensure_gl() {
     if (gl_ready_) return true;
 
+    // 诊断：Qt Widgets 应用可能已经创建了全局共享上下文 / 自己的上下文，
+    // 与我们的离屏上下文冲突时会出现"渲染调用成功但产出全透明"
+    {
+        const QSurfaceFormat def = QSurfaceFormat::defaultFormat();
+        const QOpenGLContext* global = QOpenGLContext::globalShareContext();
+        const QOpenGLContext* cur = QOpenGLContext::currentContext();
+        cubism_log("[gl] defaultFormat=%d.%d profile=%d | globalShare=%p | current=%p\n",
+                   def.majorVersion(), def.minorVersion(), static_cast<int>(def.profile()),
+                   static_cast<const void*>(global), static_cast<const void*>(cur));
+    }
+
     QSurfaceFormat format = QSurfaceFormat::defaultFormat();
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
@@ -164,8 +175,14 @@ bool CubismAvatarRenderer::ensure_gl() {
     context_ = std::make_unique<QOpenGLContext>();
     context_->setFormat(format);
     if (!context_->create()) {
-        std::fprintf(stderr, "[cubism] GL 上下文创建失败\n");
+        cubism_log("[gl] GL 上下文创建失败\n");
         return false;
+    }
+    {
+        const QSurfaceFormat got = context_->format();
+        cubism_log("[gl] 创建后 format=%d.%d profile=%d | shareContext=%p\n",
+                   got.majorVersion(), got.minorVersion(), static_cast<int>(got.profile()),
+                   static_cast<const void*>(context_->shareContext()));
     }
     surface_ = std::make_unique<QOffscreenSurface>();
     surface_->setFormat(context_->format());
