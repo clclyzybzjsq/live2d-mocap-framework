@@ -128,6 +128,30 @@ int main(int argc, char** argv) {
     check(s.distinct > 20, "画布有细节（真实渲染而非单色）");
     check(render_ms < 8.0, "管线线程读取开销可接受（< 8ms）");
 
+    // 动效验证：呼吸/物理应让画面随时间产生变化（同一语义参数下）
+    QImage frame_a(640, 480, QImage::Format_ARGB32);
+    frame_a.fill(Qt::transparent);
+    renderer->render(frame_a, sem);
+    for (int i = 0; i < 40; ++i) renderer->tick(sem); // 约 1.3 秒
+    QImage frame_b(640, 480, QImage::Format_ARGB32);
+    frame_b.fill(Qt::transparent);
+    renderer->render(frame_b, sem);
+    {
+        long d = 0, n = 0;
+        for (int y = 0; y < frame_a.height(); ++y) {
+            const QRgb* la = reinterpret_cast<const QRgb*>(frame_a.constScanLine(y));
+            const QRgb* lb = reinterpret_cast<const QRgb*>(frame_b.constScanLine(y));
+            for (int x = 0; x < frame_a.width(); ++x) {
+                d += std::abs(qRed(la[x]) - qRed(lb[x])) + std::abs(qGreen(la[x]) - qGreen(lb[x])) +
+                     std::abs(qBlue(la[x]) - qBlue(lb[x]));
+                n += 3;
+            }
+        }
+        const double diff = n ? static_cast<double>(d) / n : 0.0;
+        printf("  动效帧间差异: %.3f (0-255)\n", diff);
+        check(diff > 0.02, "呼吸/物理动效生效（画面随时间变化）");
+    }
+
     // 虚拟摄像头合成路径：Cubism 形象 + 虚化背景
     VcamCompositor compositor;
     compositor.set_avatar_renderer(renderer.get());

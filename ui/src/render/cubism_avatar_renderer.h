@@ -2,6 +2,8 @@
 
 #include <QImage>
 
+#include <chrono>
+
 #include <memory>
 #include <mutex>
 #include <string>
@@ -69,6 +71,9 @@ private:
     float offset_x_ = 0.0f;
     float offset_y_ = -0.2f;
     float time_seconds_ = 0.0f;
+    float dt_seconds_ = 1.0f / 30.0f;
+    std::chrono::steady_clock::time_point last_tick_{};
+    bool tick_started_ = false;
     bool gl_ready_ = false;
     bool ready_ = false;
 };

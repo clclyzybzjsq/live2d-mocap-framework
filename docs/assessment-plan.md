@@ -412,3 +412,76 @@ Live2D 模型加载（Cubism Core）
 - 未写 `FilterData` 注册项，因此 ffmpeg 设备列表中显示为 `(none)`（OBS 虚拟摄像头同样如此），不影响使用。
 - 目前仅提供 YUY2 一种像素格式（NV12 等按需扩展）。
 - 应用退出后消费方保持最后一帧（与 OBS 行为一致）；彩条仅在没有写端时出现。
+
+## 12. M3 Live2D Cubism 渲染接入（已完成）
+
+### 12.1 依赖准备
+
+| 依赖 | 位置 | 说明 |
+| --- | --- | --- |
+| Cubism SDK | `D:\deps\cubism`（5-r.5） | 需自行从官网下载并同意许可协议 |
+| Core 导入库 | `<build>/cubism_link/libLive2DCubismCore.a` | 官方只提供 MSVC 格式 .lib，用 `scripts/build_cubism_core_lib.ps1`（gendef + dlltool）从官方 dll 生成 |
+| GLEW | `D:\deps\glew\glew` | Cubism 的 OpenGL 后端 include `<GL/glew.h>`，MinGW 不自带；项目内直接编译 `glew.c` |
+
+构建开关：`-DLB_WITH_CUBISM=ON`（可选 `-DLB_CUBISM_SDK_DIR` / `-DLB_GLEW_DIR`）。未开启时自动回退到 QPainter 占位渲染，功能不受影响。
+
+### 12.2 渲染架构
+
+```
+相机帧(BGRA) ──┐
+              ├─> VcamCompositor ──> 虚拟摄像头共享内存
+AvatarRenderer ┘   （虚化+压暗背景 再叠加形象）
+   │
+   ├── PlaceholderAvatarRenderer（QPainter 占位形象，SDK 缺失时的回退）
+   └── CubismAvatarRenderer（Cubism 原生渲染）
+```
+
+线程模型（关键）：GL 上下文只能在创建它的线程使用，因此
+- `tick(sem)` —— **UI 线程**的 30fps 定时器驱动：渲染到离屏 FBO，读回像素写入内部缓存
+- `render(target, sem)` —— **管线回调线程**调用：只从缓存拷贝/缩放，不触碰 GL
+
+虚拟摄像头的推帧也统一由该 UI 定时器驱动，因此**动捕未启动时虚拟摄像头依然输出待机形象**（背景为兜底渐变），不必先点"开始动捕"。
+
+### 12.3 组件
+
+| 组件 | 路径 |
+| --- | --- |
+| 渲染抽象层 | `ui/src/render/avatar_renderer.h/.cpp` |
+| Cubism 渲染器 | `ui/src/render/cubism_avatar_renderer.h/.cpp` |
+| Cubism 进程级初始化 | `ui/src/render/cubism_runtime.h/.cpp`（引用计数，Option 必须持久） |
+| 模型库 | `ui/src/render/live2d_model_library.h/.cpp`（扫描 + model3.json 解析） |
+| 参数映射 | `core/include/lb/core/cubism_param_map.h`（13 项标准参数） |
+| 输出合成 | `ui/src/render/vcam_compositor.h/.cpp` |
+| 验证工具 | `tools/cubism_link_test.cpp`、`cubism_model_test.cpp`、`cubism_renderer_test.cpp`、`live2d_model_test.cpp` |
+
+### 12.4 关键实现约束（踩坑记录）
+
+1. **GL 上下文必须是兼容 Profile**：Cubism 的 OpenGL ES2 后端使用固定管线风格的调用，在 Core Profile 下**静默失败**（FBO 完整、模型已加载、上下文有效，但绘制只产生 `GL_INVALID_OPERATION` 与全空画面）。**Qt Widgets 初始化会把默认格式带回 4.6/Core**，因此必须在 `QApplication` 构造**之前**设置默认格式；且 Intel 驱动会忽略 Compatibility Profile 请求，最终用 **2.1 + NoProfile**（该版本无 profile 概念）才拿到可用上下文。
+2. **`CubismFramework::Option` 必须是持久对象**：Framework 内部保存的是它的指针，放在函数栈上返回后即成悬垂指针（表现为加载 shader 时野指针崩溃，极易误判为 glew 问题）。
+3. **模型矩阵必须每帧从布局重建**：`SetWidth()` / `Translate()` 都是把变换**乘到当前矩阵**，连续调用会逐帧累加，模型迅速漂出画面。
+4. **纹理必须生成 mipmap**：`glTexImage2D` 后不调 `glGenerateMipmap` 且 `MIN_FILTER=GL_LINEAR` 时纹理被判为不完整，采样恒返回黑色。
+5. **glew.h 必须先于任何 Qt/系统 GL 头**包含，否则 `#error gl.h included before glew.h` 并引发 GL 类型重复定义。头文件中用前置声明而非 `QOpenGLContext` 等 Qt GL 头。
+6. **Cubism 的 GLSL 源码按相对路径 `FrameworkShaders/` 加载**，文件在 Framework 的 `Rendering/OpenGL/Shaders/Standard/`（不是 Samples 目录），必须与 exe 同目录（构建已自动拷贝）。
+7. **不要显式指定 `QOpenGLContext` 的 2.1 版本以外的低版本**；`glewInit` 失败必须视为致命错误。
+8. **中文路径**：argv 为本地代码页，`QImage` 需用 `fromLocal8Bit` 构造，`fopen` 直接用该编码。
+9. MinGW 链接 SDK：`gendef` 的 `-o` 选项不可靠（改用工作目录方式），且其 stderr 输出在 `$ErrorActionPreference='Stop'` 下会被误当终止错误。
+10. SDK 源码有 GCC 不接受之处（`wglGetProcAddress` 的 `PROC` 直接赋给 `void*`），对第三方 Framework target 局部加 `-fpermissive`。
+
+### 12.5 动效
+
+大量解包模型（如本项目验证用的 9 个）的 `model3.json` **不含 Physics / EyeBlink / Breath 数据**，因此框架侧的物理与呼吸对它们无效。为此实现**程序化待机微动**：当 `sem.face_detected == false`（动捕未在驱动）时，按正弦函数驱动 `ParamAngleX/Y/Z`、`ParamBodyAngleX`、`ParamBreath`，并每约 4 秒自动眨眼一次。动捕活跃时完全让位给动捕参数，二者不冲突。
+
+### 12.6 验证结果
+
+- **渲染器级**：`tick` 3.3–4.9 ms/帧，画布非透明占比 52.5%、颜色种类 198（真实渲染而非单色）
+- **动效**：同参数下帧间差异 1.93（0.000 表示完全静止）
+- **虚拟摄像头**：连续采样输出中心为肤色系（RBG 75–117 波动，来自呼吸/眨眼），ffmpeg 可正常拉流
+- **浮窗**：屏幕抓取 320x420 窗口，肤色系像素 8.6%、颜色种类 28
+- **降级路径**：未编译 SDK 时自动使用占位渲染器，功能完整
+
+### 12.7 已知限制
+
+- 当前只有动捕驱动的 13 个参数 + 待机微动；**动作（motion）与表情（expression）尚未接入**（模型带 66 个动作/36 个表情，可作为后续增强）
+- ffmpeg 拉取**第一帧**偶尔拿到 filter 连接前的旧内容（filter 连接时机），可从"连接后丢弃首帧"改善
+- 输出构图按 640x480 调优（zoom 3.5 / offsetY -0.2），换用竖版模型时可能需要微调
+- 解包模型资源的版权风险自担（仅建议自用验证）
