@@ -357,3 +357,58 @@ Live2D 模型加载（Cubism Core）
 - M2：DirectShow 虚拟摄像头（最高风险专项）、Cubism 渲染接入、模型目录/侧车参数做成可配置。
 - M4：25 FPS / 120ms / CPU / 内存 / 启动时间验收压测；打包与自注册。
 - 侧车默认路径（python 解释器/脚本/模型目录）当前为开发期硬编码，环境变量可覆盖。
+
+## 11. M2 虚拟摄像头专项（已完成）
+
+### 11.1 组成
+
+| 组件 | 路径 | 说明 |
+| --- | --- | --- |
+| 共享内存协议 | `core/include/lb/core/vcam_protocol.h` | `lb_vcam_frames`：128B 打包头 + YUY2 帧数据，单缓冲 + frame_index 递增 |
+| 应用写端 | `platform/windows/src/win_virtual_camera.cpp` | BGRA→YUY2（BT.601）、自愈注册（已注册则跳过） |
+| filter | `platform/windows/vcam_filter/` | 手写 IPin/IBaseFilter/push 线程（不用 strmbase），全静态运行时 |
+| UI 接线 | `ui/src/main_window.cpp`、`ui/src/pages/output_page.cpp` | 输出页开关 → 真实 start/stop；注册失败不阻止写端启动 |
+| 注册/验收脚本 | `scripts/register_vcam.ps1`、`scripts/verify_vcam.ps1` | 脚本自动请求提权；验收做枚举 + 拉流 + 格式/内容校验 |
+| 测试工具 | `tools/vcam_probe`、`vcam_flow`、`vcam_write`、`vcam_feed` | 枚举探测 / 图协商 / 写端协议 / 持续喂帧 |
+
+### 11.2 验收结果
+
+- **枚举**：`ffmpeg -f dshow -list_devices` 列出 `LiveBridge Virtual Camera`。
+- **拉流**：`YUY2 (yuyv422) 640x480 30fps`，成功输出 PNG；无写端时显示彩条回退。
+- **端到端**：`lb_vcam_feed` 持续写左红右蓝帧，ffmpeg 同时拉流，采样像素 `RGB(253,0,0)` / `RGB(0,0,253)` 与写入完全一致——应用→共享内存→消费方链路逐像素正确。
+- **构建与冒烟**：全量构建通过，UI 在干净 PATH（无 Qt/MinGW）下独立启动正常。
+
+### 11.3 关键实现约束（踩坑记录，勿重复踩）
+
+1. **设备注册必须写到新式实例位置**：现代 Windows 的 `ICreateDevEnum` 读
+   `HKLM\Software\Classes\CLSID\{860BB310-5D01-11D0-BD3B-00A0C911CE86}\Instance\{设备CLSID}`
+   （值：`FriendlyName`、`CLSID`）。只写旧式 `MediaCategories\{类别}\{CLSID}` 时设备**完全不出现**。
+   该位置写入 **HKCU 同样生效**（HKCR 合并视图）——因此**注册不需要管理员权限**，旧结论"必须 HKLM"只对旧式路径成立。
+2. **pin 必须实现 `IKsPropertySet`**：ffmpeg 用 `Get(AMPROPSETID_Pin, AM_PROPERTY_PIN_CATEGORY)`
+   判断哪个 output pin 是采集 pin，必须返回 `PIN_CATEGORY_CAPTURE`；缺失时只报
+   "Could not find output pin from video capture device"。
+3. **pin 必须实现 `IAMStreamConfig`**，其 IID 是 `C6E13340-30AC-11D0-A18C-00A0C9118956`。
+   不要使用工具链 `strmiids` 里的 `IID_IAMStreamConfig` 符号：实测取值与消费方请求不一致，
+   会导致 QI 永远匹配不上（同理 `IKsPropertySet` 用显式常量更稳）。
+4. **`biCompression` 必须与数据布局一致**：数据是 YUY2（Y0 U Y1 V）就必须声明 `'YUY2'`；
+   声明 `'UYVY'` 会让 ffmpeg 按 UYVY 解析，画面颜色错乱（表现为整体偏绿/品红）。
+5. **`DllRegisterServer` 取 DLL 路径必须用 DllMain 的 HINSTANCE**：
+   该函数运行在 regsvr32 宿主进程里，`GetModuleFileNameW(nullptr)` 会返回 regsvr32.exe 自身路径。
+6. **`regsvr32` 的退出码**：它是 GUI 子系统程序，用 `& regsvr32` 拿不到可靠 `$LASTEXITCODE`，
+   脚本必须用 `Start-Process -Wait -PassThru` 取 `ExitCode`。
+7. **filter 的调试输出默认关闭**：filter 运行在消费方进程内，stderr 输出会污染对方；
+   需要排查时用 `-DLB_VCAM_TRACE` 构建。
+8. **运行库部署**：`build\ui` 与 `build\` 必须放 **GCC16(msvcrt)** 的
+   `libgcc_s_seh-1 / libstdc++-6 / libwinpthread-1`；**不要用 `windeployqt --compiler-runtime`**
+   （会带入 Qt 自带的 GCC13 版，启动报"无法定位程序输入点"）。`scripts/build.ps1` 已固化该步骤。
+9. **本机 quartz 图组件注册被精简**（`qedit.dll` 在但 NullRenderer/SampleGrabber 的 CLSID 缺失），
+   自测图曾出现崩溃，易误判为 filter 问题；实为测试 sink 不完整
+   （`QueryPinInfo.pFilter` / `QueryFilterInfo.pGraph` / `JoinFilterGraph` 未实现）。
+   真实消费方（ffmpeg 自己的 sink）路径正常，验证以 ffmpeg / EVR 为准。
+
+### 11.4 已知限制
+
+- 输出尺寸由写端（共享内存）决定：消费方的 `SetFormat` 只接受与当前尺寸一致的请求，避免 stride 不一致。
+- 未写 `FilterData` 注册项，因此 ffmpeg 设备列表中显示为 `(none)`（OBS 虚拟摄像头同样如此），不影响使用。
+- 目前仅提供 YUY2 一种像素格式（NV12 等按需扩展）。
+- 应用退出后消费方保持最后一帧（与 OBS 行为一致）；彩条仅在没有写端时出现。
