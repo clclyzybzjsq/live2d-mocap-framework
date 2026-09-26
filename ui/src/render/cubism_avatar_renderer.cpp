@@ -228,7 +228,14 @@ CubismAvatarRenderer::~CubismAvatarRenderer() {
 bool CubismAvatarRenderer::ensure_gl() {
     if (gl_ready_) return true;
 
-    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    // 显式构造格式，不使用 defaultFormat()：Qt Widgets 应用会把进程默认格式
+    // 变成 4.6/Core Profile，而 Cubism 的 OpenGL ES2 后端在 Core Profile 下
+    // 会大量 GL_INVALID_OPERATION 并渲染出空白画面。
+    // 实测（tools/gl_format_probe）：4.6 + CompatibilityProfile 在本机 Intel
+    // 驱动上能真正拿到 Compatibility 上下文。
+    QSurfaceFormat format;
+    format.setVersion(4, 6);
+    format.setProfile(QSurfaceFormat::CompatibilityProfile);
     format.setDepthBufferSize(24);
     format.setStencilBufferSize(8);
 
@@ -308,13 +315,23 @@ void CubismAvatarRenderer::release_gl() {
 }
 
 bool CubismAvatarRenderer::initialize(const Live2dModelInfo& model) {
-    if (!model.usable()) return false;
+    if (!model.usable()) {
+        std::fprintf(stderr, "[cubism] 模型不可用，跳过初始化\n");
+        return false;
+    }
 
     // GL 上下文必须在调用线程创建（约定为 UI 线程）
-    if (!ensure_gl()) return false;
-    if (!context_->makeCurrent(surface_.get())) return false;
+    if (!ensure_gl()) {
+        std::fprintf(stderr, "[cubism] GL 初始化失败，回退占位渲染\n");
+        return false;
+    }
+    if (!context_->makeCurrent(surface_.get())) {
+        std::fprintf(stderr, "[cubism] makeCurrent 失败\n");
+        return false;
+    }
 
     if (!build_model(model)) {
+        std::fprintf(stderr, "[cubism] 模型加载失败\n");
         context_->doneCurrent();
         return false;
     }
