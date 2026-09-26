@@ -16,6 +16,7 @@ set(LB_CUBISM_CORE_DLL "${LB_CUBISM_SDK_DIR}/Core/dll/windows/x86_64/Live2DCubis
 set(LB_CUBISM_CORE_IMPLIB "${CMAKE_BINARY_DIR}/cubism_link/libLive2DCubismCore.a")
 # Cubism 的 OpenGL 后端 include <GL/glew.h>（MinGW 不自带 GLEW）
 set(LB_GLEW_DIR "D:/deps/glew/glew" CACHE PATH "GLEW root (src/glew.c, include/GL)")
+set(LB_DIRECTXMATH_INC "D:/deps/directxmath/Inc" CACHE PATH "Official DirectXMath include dir (D3D11 backend)")
 
 if(LB_WITH_CUBISM)
     if(NOT EXISTS "${LB_CUBISM_SDK_DIR}/Core/include/Live2DCubismCore.h")
@@ -38,12 +39,23 @@ if(LB_WITH_CUBISM)
     target_compile_definitions(lb_glew PRIVATE GLEW_NO_GLU)
 
     # 官方 Framework 的 Rendering/CMakeLists.txt 用 FRAMEWORK_SOURCE 选择渲染后端目录
-    set(FRAMEWORK_SOURCE "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/OpenGL")
+    set(FRAMEWORK_SOURCE "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/D3D11")
     set(RENDER_INCLUDE_PATH "")
     add_subdirectory("${LB_CUBISM_SDK_DIR}/Framework"
                      "${CMAKE_BINARY_DIR}/cubism_framework" EXCLUDE_FROM_ALL)
     # 桌面 OpenGL 目标（Cubism 后端据此选择 GL 头）
-    target_compile_definitions(Framework PRIVATE CSM_TARGET_WIN_GL)
+    # D3D11 后端：与 Qt 解耦，避开 OpenGL 在 Qt Widgets 下的 Profile 问题。
+    # MinGW 自带的 DirectXMath 是简化版（缺 XMMATRIX），必须用官方完整版，
+    # 且要排在系统 include 之前
+    if(EXISTS "${LB_DIRECTXMATH_INC}/DirectXMath.h")
+        target_include_directories(Framework BEFORE PUBLIC "${LB_DIRECTXMATH_INC}")
+        # Cubism 的 D3D11 代码按 MSVC 的 __m128 union 语义访问 XMVECTOR
+        # （x.r[0].m128_f32[0]），GCC/MinGW 的 __m128 是内置类型没有该成员，
+        # 因此必须让 DirectXMath 走非 intrinsic 的结构体实现
+        target_compile_definitions(Framework PUBLIC _XM_NO_INTRINSICS_)
+    else()
+        message(FATAL_ERROR "缺少官方 DirectXMath：${LB_DIRECTXMATH_INC}/DirectXMath.h（见 docs/assessment-plan.md M3 节）")
+    endif()
     target_link_libraries(Framework PUBLIC lb_glew opengl32)
     # SDK 源码把 wglGetProcAddress 的 PROC 返回值直接赋给 void*（MSVC 宽松、
     # GCC 报错），第三方代码不便改动，这里局部放宽该转换

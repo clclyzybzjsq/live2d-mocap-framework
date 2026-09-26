@@ -3,7 +3,7 @@
 #include <QImage>
 
 #include <chrono>
-
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -11,22 +11,24 @@
 
 #include "avatar_renderer.h"
 
-// 实现文件必须先包含 <GL/glew.h> 再包含任何 Qt GL 头，否则 glew 会报
-// "gl.h included before glew.h" 并引发 GL 类型重复定义。
-// GL 上下文用原生 WGL（见 wgl_context.h）：Qt 在 Widgets 应用里拿不到
-// Compatibility Profile，Cubism 在 Core Profile 下会渲染出空白画面。
+// 渲染后端：D3D11（CubismRenderer_D3D11）。
+//
+// 为什么不用 OpenGL：Qt Widgets 应用里 QOpenGLContext 只能拿到 Core Profile
+// （Cubism 的 ES2 后端渲染空白）；改用原生 WGL 拿到 Compatibility Profile 后
+// 同一份代码仍以 GL_INVALID_OPERATION 失败（而 Qt 上下文下正常）。
+// D3D11 与 Qt 完全解耦，且本项目平台层已在用 D3D11。
 namespace lb::ui {
 
-class WglOffscreenContext;
+class D3d11Device;
+class D3d11RenderTarget;
 class CubismModelRuntime;
 
-// 基于 Live2D Cubism 原生 SDK 的头像渲染器（OpenGL 离屏渲染）。
+// 基于 Live2D Cubism 原生 SDK 的头像渲染器（D3D11 离屏渲染）。
 //
 // 线程模型：
-//   tick()   —— 必须在创建了 GL 上下文的线程（UI 线程）调用，真正渲染一帧到
-//               离屏 FBO，读回像素写入内部缓存；
-//   render() —— 任意线程（管线回调线程）调用，只从缓存拷贝/缩放，不触碰 GL。
-// 这样管线的帧率与 GL 上下文线程互不干扰。
+//   tick()   —— 在持有 D3D11 设备的线程（UI 线程）调用，渲染一帧到离屏渲染
+//               目标并读回像素写入内部缓存；
+//   render() —— 任意线程（管线回调线程）调用，只从缓存拷贝/缩放，不触碰 GPU。
 class CubismAvatarRenderer final : public AvatarRenderer {
 public:
     CubismAvatarRenderer();
@@ -40,49 +42,36 @@ public:
 
     // 渲染分辨率（合成画布通常为相机尺寸 640x480）
     void set_render_size(int w, int h);
-    // 模型显示缩放（1.0 为默认适配；越大模型越大）
+    // 取景：zoom 为放大倍数，offset 为画面平移（±1 约等于整幅画面尺寸）
     void set_view(float zoom, float offset_x, float offset_y);
     void set_zoom(float z);
-    // 模型显示位置偏移（归一化，0 为中心）
     void set_offset(float x, float y);
 
 private:
-    bool ensure_gl();
-    bool create_fbo();
+    bool ensure_device();
     bool build_model(const Live2dModelInfo& model);
-    void release_gl();
+    void release_gpu();
     void apply_params(const lb::core::SemanticParams& sem);
     void render_frame();
 
-    std::unique_ptr<WglOffscreenContext> gl_ctx_;
+    std::unique_ptr<D3d11Device> d3d_;
+    std::unique_ptr<D3d11RenderTarget> rt_;
     std::unique_ptr<CubismModelRuntime> runtime_;
-    std::vector<unsigned int> textures_;
-    // Core Profile 下没有绑定 VAO 就不允许绘制（Cubism 的 ES2 后端不自建 VAO），
-    // 因此这里准备一个空 VAO 供每帧绘制前绑定
-    unsigned int vao_ = 0;
-    // 自管 FBO：Qt 的 QOpenGLFramebufferObject 依赖 Qt 自己的当前上下文，
-    // 无法与原生 WGL 上下文配合使用
-    unsigned int fbo_ = 0;
-    unsigned int color_tex_ = 0;
-    unsigned int depth_rbo_ = 0;
-    bool fbo_ready_ = false;
-
-    std::string model_dir_;
+    bool device_ready_ = false;
 
     mutable std::mutex mutex_;
-    QImage front_; // 最近一次渲染结果（供 render() 读取）
-    std::vector<uint8_t> readback_; // glReadPixels 的紧凑缓冲
+    QImage front_;         // 最近一次渲染结果（供 render() 读取）
+    QImage readback_;      // 读回复用缓冲
 
     int width_ = 640;
     int height_ = 480;
     float zoom_ = 3.5f;
     float offset_x_ = 0.0f;
-    float offset_y_ = -0.2f;
+    float offset_y_ = 0.0f;
     float time_seconds_ = 0.0f;
     float dt_seconds_ = 1.0f / 30.0f;
     std::chrono::steady_clock::time_point last_tick_{};
     bool tick_started_ = false;
-    bool gl_ready_ = false;
     bool ready_ = false;
 };
 
