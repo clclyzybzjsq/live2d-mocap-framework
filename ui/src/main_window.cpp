@@ -131,6 +131,20 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     ui_timer_ = new QTimer(this);
     connect(ui_timer_, &QTimer::timeout, this, &MainWindow::refresh_status);
     ui_timer_->start(250);
+
+    // 形象渲染节拍：Cubism 渲染必须在持有 GL 上下文的 UI 线程进行，
+    // 管线线程只通过 render() 读取最近一帧结果。
+    avatar_timer_ = new QTimer(this);
+    connect(avatar_timer_, &QTimer::timeout, this, [this]() {
+        if (!avatar_renderer_) return;
+        lb::core::SemanticParams sem;
+        {
+            std::lock_guard<std::mutex> lock(semantic_mutex_);
+            sem = last_semantic_;
+        }
+        avatar_renderer_->tick(sem);
+    });
+    avatar_timer_->start(33); // 约 30fps
 }
 
 MainWindow::~MainWindow() {
@@ -372,6 +386,11 @@ void MainWindow::on_pipeline_frame(const lb::core::FrameView& frame,
                                    const lb::core::ModelParamList& params,
                                    const lb::core::SemanticParams& semantic,
                                    const lb::core::PipelineStats& stats) {
+    // 记录最近语义参数供 UI 线程的渲染节拍使用（跨线程，加锁拷贝）
+    {
+        std::lock_guard<std::mutex> lock(semantic_mutex_);
+        last_semantic_ = semantic;
+    }
     // 虚拟摄像头喂帧：管线回调线程直推（vcam 内部有锁）。
     // 输出内容不是相机原始帧，而是合成画面：默认 Live2D 形象 + 虚化背景
     // （"仅输出背景"开启时只输出背景，不含 Live2D）。

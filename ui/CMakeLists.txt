@@ -19,6 +19,10 @@ add_executable(lb_ui
     src/render/avatar_painter.cpp
     src/render/avatar_renderer.h
     src/render/avatar_renderer.cpp
+    src/render/cubism_avatar_renderer.h
+    src/render/cubism_avatar_renderer.cpp
+    src/render/cubism_runtime.h
+    src/render/cubism_runtime.cpp
     src/render/live2d_model_library.h
     src/render/live2d_model_library.cpp
     src/render/vcam_compositor.h
@@ -40,6 +44,9 @@ if(LB_WITH_CUBISM)
         "${LB_CUBISM_SDK_DIR}/Core/include"
         "${LB_CUBISM_SDK_DIR}/Framework/src")
     target_link_libraries(lb_ui PRIVATE Framework "${LB_CUBISM_CORE_IMPLIB}")
+if(LB_WITH_CUBISM)
+    target_link_libraries(lb_ui PRIVATE Qt6::OpenGL)
+endif()
     # 运行时需要官方 Core dll 与 Cubism 的 GLSL 源码（渲染器按相对路径
     # FrameworkShaders/ 加载），两者都必须与 exe 同目录
     add_custom_command(TARGET lb_ui POST_BUILD
@@ -92,4 +99,32 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/OpenGL/Shaders/Standard"
                 "$<TARGET_FILE_DIR:lb_cubism_model_test>/FrameworkShaders")
+
+    # 渲染器级验证：CubismAvatarRenderer 的完整接口路径（tick + render + 合成）
+    add_executable(lb_cubism_renderer_test
+        ${CMAKE_SOURCE_DIR}/tools/cubism_renderer_test.cpp
+        src/render/avatar_painter.cpp
+        src/render/avatar_renderer.cpp
+        src/render/cubism_avatar_renderer.cpp
+        src/render/cubism_runtime.cpp
+        src/render/live2d_model_library.cpp
+        src/render/vcam_compositor.cpp
+    )
+    target_compile_definitions(lb_cubism_renderer_test PRIVATE LB_WITH_CUBISM)
+    target_include_directories(lb_cubism_renderer_test PRIVATE
+        src
+        "${LB_CUBISM_SDK_DIR}/Core/include"
+        "${LB_CUBISM_SDK_DIR}/Framework/src")
+    target_link_libraries(lb_cubism_renderer_test PRIVATE
+        Qt6::Gui Qt6::OpenGL Framework "${LB_CUBISM_CORE_IMPLIB}" lb_core)
+    target_compile_features(lb_cubism_renderer_test PRIVATE cxx_std_17)
+    if(NOT MSVC)
+        target_compile_options(lb_cubism_renderer_test PRIVATE -fpermissive)
+    endif()
+    add_custom_command(TARGET lb_cubism_renderer_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LB_CUBISM_CORE_DLL}" "$<TARGET_FILE_DIR:lb_cubism_renderer_test>/Live2DCubismCore.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/OpenGL/Shaders/Standard"
+                "$<TARGET_FILE_DIR:lb_cubism_renderer_test>/FrameworkShaders")
 endif()

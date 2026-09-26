@@ -7,6 +7,7 @@
 #include <QMainWindow>
 
 #include <memory>
+#include <mutex>
 
 class QLabel;
 class QAction;
@@ -90,6 +91,10 @@ private:
     // 上一次的渲染器：延迟回收，避免管线回调线程仍在使用时被销毁
     std::unique_ptr<AvatarRenderer> retired_renderer_;
     Live2dModelInfo current_model_;
+    // Cubism 渲染需要 GL 上下文，只能在 UI 线程驱动
+    QTimer* avatar_timer_ = nullptr;
+    std::mutex semantic_mutex_;
+    lb::core::SemanticParams last_semantic_;
     FloatWindowWidget* float_window_ = nullptr;
     QTimer* ui_timer_ = nullptr;
     bool running_ = false;

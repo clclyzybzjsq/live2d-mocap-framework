@@ -24,7 +24,12 @@ public:
     // 绑定模型（占位实现忽略模型信息，总能成功）
     virtual bool initialize(const Live2dModelInfo& model) = 0;
 
-    // 渲染到 target；target 的尺寸即输出画布尺寸，未绘制区域保持原有 alpha
+    // UI 线程调用：需要 GL 上下文等线程绑定资源的渲染器在此真正渲染一帧；
+    // 占位渲染器不需要，默认空实现。
+    virtual void tick(const lb::core::SemanticParams& sem) { (void)sem; }
+
+    // 渲染到 target；target 的尺寸即输出画布尺寸，未绘制区域保持原有 alpha。
+    // 可能在管线回调线程调用，实现不得触碰 GL 上下文等线程绑定资源。
     virtual void render(QImage& target, const lb::core::SemanticParams& sem) = 0;
 
     virtual QString name() const = 0;     // 渲染器显示名（状态栏/日志用）
