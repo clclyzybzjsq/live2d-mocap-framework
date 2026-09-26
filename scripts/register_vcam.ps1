@@ -1,4 +1,4 @@
-﻿# 虚拟摄像头注册/反注册。
+# 虚拟摄像头注册/反注册。
 # DirectShow 设备枚举（ICreateDevEnum）只读 HKLM，因此注册必须写入 HKLM，需要一次管理员授权。
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts/register_vcam.ps1              # 注册（非管理员会自动请求提权）
@@ -34,25 +34,27 @@ if (-not $isAdmin) {
 }
 
 $regsvr = Join-Path $env:WINDIR 'System32\regsvr32.exe'
+# regsvr32 是 GUI 子系统程序，用 & 调用拿不到可靠退出码（$LASTEXITCODE 为残留值），
+# 必须用 Start-Process -Wait -PassThru 才能拿到真实 ExitCode。
 if ($Unregister) {
-    & $regsvr /s /u $dll
+    $rp = Start-Process -FilePath $regsvr -ArgumentList @('/s', '/u', "`"$dll`"") -Wait -PassThru
 } else {
-    & $regsvr /s $dll
+    $rp = Start-Process -FilePath $regsvr -ArgumentList @('/s', "`"$dll`"") -Wait -PassThru
 }
-if ($LASTEXITCODE -ne 0) { throw "regsvr32 执行失败（exit=$LASTEXITCODE）" }
+if ($rp.ExitCode -ne 0) { throw "regsvr32 执行失败（exit=$($rp.ExitCode)）" }
 
-# 结果核验：CLSID 的 InprocServer32 与 DirectShow 设备类别键都必须存在
+# 结果核验：CLSID 的 InprocServer32、设备实例项、旧式类别键都必须存在
 $key = "HKLM:\Software\Classes\CLSID\$clsid\InprocServer32"
+$inst = "HKLM:\Software\Classes\CLSID\{860BB310-5D01-11D0-BD3B-00A0C911CE86}\Instance\$clsid"
 $cat = "HKLM:\Software\Classes\MediaCategories\{860BB310-5D01-11D0-BD3B-00A0C911CE86}\$clsid"
 if ($Unregister) {
     if (Test-Path $key) { Write-Output '注意：注册表项仍存在，卸载可能不完整' }
     else { Write-Output '虚拟摄像头已卸载' }
 } else {
     if (-not (Test-Path $key)) { throw '注册后未找到 InprocServer32 键，注册未生效' }
-    $path = (Get-ItemProperty $key).'(default)'
-    if ($path -ne $dll) { Write-Output "注意：注册路径为 $path" }
-    Write-Output "虚拟摄像头已注册: $path"
-    if (Test-Path $cat) { Write-Output '设备类别项: OK' }
-    else { Write-Output '设备类别项: 缺失（设备枚举可能失败）' }
+    Write-Output "虚拟摄像头已注册: $((Get-ItemProperty $key).'(default)')"
+    # 设备实例项是现代 Windows 枚举设备的位置；缺失则 ffmpeg/OBS 等看不到设备
+    if (Test-Path $inst) { Write-Output '设备实例项: OK' } else { Write-Output '设备实例项: 缺失（设备将无法被枚举）' }
+    if (Test-Path $cat) { Write-Output '类别键(兼容): OK' } else { Write-Output '类别键(兼容): 缺失' }
     Write-Output '验证命令: ffmpeg -hide_banner -list_devices true -f dshow -i dummy'
 }

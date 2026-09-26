@@ -15,7 +15,11 @@ namespace lb::vcam {
 class LBVcamPushSource;
 
 // 输出 pin：实现 IPin（source 侧），内部持有下游 IMemInputPin/IMemAllocator。
-class LBVcamOutputPin final : public IPin {
+// 另实现两个消费方（ffmpeg/OBS/Teams 等）打开设备时依赖的接口：
+//   IAMStreamConfig —— 枚举/设置分辨率与像素格式
+//   IKsPropertySet  —— 查询 pin 类别（PIN_CATEGORY_CAPTURE），
+//                      ffmpeg 靠它判断哪个 output pin 是采集 pin（缺失即放弃设备）
+class LBVcamOutputPin final : public IPin, public IAMStreamConfig, public IKsPropertySet {
 public:
     explicit LBVcamOutputPin(LBVcamPushSource* owner);
 
@@ -23,6 +27,21 @@ public:
     STDMETHODIMP QueryInterface(REFIID riid, void** ppv);
     STDMETHODIMP_(ULONG) AddRef();
     STDMETHODIMP_(ULONG) Release();
+
+    // IAMStreamConfig
+    STDMETHODIMP SetFormat(AM_MEDIA_TYPE* pmt);
+    STDMETHODIMP GetFormat(AM_MEDIA_TYPE** ppmt);
+    STDMETHODIMP GetNumberOfCapabilities(int* piCount, int* piSize);
+    STDMETHODIMP GetStreamCaps(int iIndex, AM_MEDIA_TYPE** ppmt, BYTE* pSCC);
+
+    // IKsPropertySet
+    STDMETHODIMP Set(REFGUID guidPropSet, DWORD dwPropID, LPVOID pInstanceData,
+                     DWORD cbInstanceData, LPVOID pPropData, DWORD cbPropData);
+    STDMETHODIMP Get(REFGUID guidPropSet, DWORD dwPropID, LPVOID pInstanceData,
+                     DWORD cbInstanceData, LPVOID pPropData, DWORD cbPropData,
+                     DWORD* pcbReturned);
+    STDMETHODIMP QuerySupported(REFGUID guidPropSet, DWORD dwPropID,
+                                DWORD* pTypeSupport);
 
     // IPin
     STDMETHODIMP Connect(IPin* pReceivePin, const AM_MEDIA_TYPE* pmt);
@@ -64,6 +83,9 @@ private:
     AM_MEDIA_TYPE connected_mt_{};
     bool connected_ = false;
     bool own_alloc_ = false;
+
+    // IAMStreamConfig 能力查询用：当前共享内存尺寸（无写端时为彩条尺寸）
+    void current_size(int* w, int* h) const;
 
     struct Shm {
         HANDLE map = nullptr;

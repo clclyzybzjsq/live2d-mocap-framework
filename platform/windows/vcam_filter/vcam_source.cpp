@@ -12,6 +12,23 @@ constexpr const wchar_t* kShmName = L"lb_vcam_frames";
 constexpr int kDefaultW = 640;
 constexpr int kDefaultH = 480;
 
+// IAMStreamConfig / IKsPropertySet 的 IID：显式常量。
+// 注意不要用工具链 strmiids 里的 IID_IAMStreamConfig 符号（取值不可靠，
+// 实测与消费方（ffmpeg）请求的不一致，导致 QI 永远匹配不上）。
+static const GUID kIID_IAMStreamConfig = {
+    0xC6E13340, 0x30AC, 0x11D0, {0xA1, 0x8C, 0x00, 0xA0, 0xC9, 0x11, 0x89, 0x56}};
+// IKsPropertySet —— ffmpeg 用它查询 pin 的 KSPROPERTY 属性
+static const GUID kIID_IKsPropertySet = {
+    0x31EFAC30, 0x515C, 0x11D0, {0xA9, 0xAA, 0x00, 0xAA, 0x00, 0x61, 0xBE, 0x93}};
+// AMPROPSETID_Pin / PIN_CATEGORY_CAPTURE
+static const GUID kAMPROPSETID_Pin = {
+    0x9B00F101, 0x1567, 0x11D1, {0xB3, 0xF1, 0x00, 0xAA, 0x00, 0x37, 0x61, 0xC5}};
+static const GUID kPIN_CATEGORY_CAPTURE = {
+    0xFB6C4281, 0x0353, 0x11D1, {0x90, 0x5F, 0x00, 0x00, 0xC0, 0xCC, 0x16, 0xBA}};
+constexpr DWORD kAmPropertyPinCategory = 0;
+constexpr DWORD kAmPropertyPinName = 1;
+constexpr DWORD kKsPropertySupportGet = 1;
+
 // ---- 简易枚举器：单 pin（元素类型与接口类型分离） ----
 template <typename EnumT, typename ItemT>
 class SingleEnum final : public EnumT {
@@ -24,7 +41,8 @@ public:
     }
     STDMETHODIMP QueryInterface(REFIID riid, void** ppv) {
         if (!ppv) return E_POINTER;
-        if (riid == IID_IUnknown) {
+        // 枚举器必须支持自身接口（调用方常 QI 回来）
+        if (riid == IID_IUnknown || riid == __uuidof(EnumT)) {
             *ppv = static_cast<EnumT*>(this);
             AddRef();
             return S_OK;
@@ -41,6 +59,8 @@ public:
 
     // IEnum 公共
     STDMETHODIMP Next(ULONG c, ItemT** pp, ULONG* pc) {
+        std::fprintf(stderr, "[lb_vcam] enum Next(c=%lu pos=%lu)\n",
+                     static_cast<unsigned long>(c), static_cast<unsigned long>(pos_));
         if (!pp) return E_POINTER;
         ULONG got = 0;
         while (got < c && pos_ < 1) {
@@ -423,6 +443,7 @@ STDMETHODIMP LBVcamPushSource::GetStartTime(REFERENCE_TIME* pT) {
 
 // -- IBaseFilter --
 STDMETHODIMP LBVcamPushSource::EnumPins(IEnumPins** ppEnum) {
+    std::fprintf(stderr, "[lb_vcam] filter EnumPins\n");
     if (!ppEnum) return E_POINTER;
     *ppEnum = new PinEnum(pin_);
     return S_OK;
@@ -551,9 +572,26 @@ void LBVcamPushSource::fill_bars(uint8_t* dst, size_t dst_pitch, int w, int h) {
 LBVcamOutputPin::LBVcamOutputPin(LBVcamPushSource* owner) : owner_(owner) {}
 
 STDMETHODIMP LBVcamOutputPin::QueryInterface(REFIID riid, void** ppv) {
+    std::fprintf(stderr,
+                 "[lb_vcam] pin QI {%08lX-%04X-%04X-%02X%02X%02X%02X%02X%02X%02X%02X} streamcfg_match=%d\n",
+                 static_cast<unsigned long>(riid.Data1), riid.Data2, riid.Data3,
+                 riid.Data4[0], riid.Data4[1], riid.Data4[2], riid.Data4[3],
+                 riid.Data4[4], riid.Data4[5], riid.Data4[6], riid.Data4[7],
+                 (riid == kIID_IAMStreamConfig) ? 1 : 0);
     if (!ppv) return E_POINTER;
     if (riid == IID_IUnknown || riid == IID_IPin) {
         *ppv = static_cast<IPin*>(this);
+        AddRef();
+        return S_OK;
+    }
+    if (riid == kIID_IAMStreamConfig) {
+        std::fprintf(stderr, "[lb_vcam] pin QI -> IAMStreamConfig OK\n");
+        *ppv = static_cast<IAMStreamConfig*>(this);
+        AddRef();
+        return S_OK;
+    }
+    if (riid == kIID_IKsPropertySet) {
+        *ppv = static_cast<IKsPropertySet*>(this);
         AddRef();
         return S_OK;
     }
@@ -741,6 +779,7 @@ STDMETHODIMP LBVcamOutputPin::QueryPinInfo(PIN_INFO* pInfo) {
 }
 STDMETHODIMP LBVcamOutputPin::Notify(IBaseFilter*, PIN_DIRECTION) { return S_OK; }
 STDMETHODIMP LBVcamOutputPin::QueryDirection(PIN_DIRECTION* pDir) {
+    std::fprintf(stderr, "[lb_vcam] pin QueryDirection\n");
     if (!pDir) return E_POINTER;
     *pDir = PINDIR_OUTPUT;
     return S_OK;
@@ -753,8 +792,135 @@ STDMETHODIMP LBVcamOutputPin::QueryId(LPWSTR* id) {
     *id = buf;
     return S_OK;
 }
-STDMETHODIMP LBVcamOutputPin::QueryAccept(const AM_MEDIA_TYPE* pmt) {
-    std::fprintf(stderr, "[lb_vcam] QueryAccept (maj=%d sub=%d fmtt=%d)\n",
+
+// ---- IAMStreamConfig ----
+// 能力以共享内存当前尺寸为准（无写端时为彩条的 640x480）。消费方（ffmpeg 等）
+// 打开设备时会先 GetNumberOfCapabilities/GetStreamCaps 或 GetFormat 拿尺寸。
+void LBVcamOutputPin::current_size(int* w, int* h) const {
+    *w = kDefaultW;
+    *h = kDefaultH;
+    read_shm_size(shm_header(), w, h);
+}
+
+STDMETHODIMP LBVcamOutputPin::SetFormat(AM_MEDIA_TYPE* pmt) {
+    std::fprintf(stderr, "[lb_vcam] IAMStreamConfig::SetFormat\n");
+    if (!pmt) return E_POINTER;
+    if (pmt->majortype != MEDIATYPE_Video || pmt->subtype != MEDIASUBTYPE_YUY2)
+        return VFW_E_INVALIDMEDIATYPE;
+    // 只接受与当前共享内存尺寸一致的请求：输出尺寸由写端决定，
+    // 接受别的尺寸会导致消费方按错误 stride 解析画面
+    if (pmt->formattype == FORMAT_VideoInfo && pmt->pbFormat) {
+        const VIDEOINFOHEADER* vih = reinterpret_cast<const VIDEOINFOHEADER*>(pmt->pbFormat);
+        int w = 0, h = 0;
+        current_size(&w, &h);
+        if (vih->bmiHeader.biWidth != w || vih->bmiHeader.biHeight != h)
+            return VFW_E_INVALIDMEDIATYPE;
+    }
+    return S_OK;
+}
+
+STDMETHODIMP LBVcamOutputPin::GetFormat(AM_MEDIA_TYPE** ppmt) {
+    std::fprintf(stderr, "[lb_vcam] IAMStreamConfig::GetFormat\n");
+    if (!ppmt) return E_POINTER;
+    int w = 0, h = 0;
+    current_size(&w, &h);
+    AM_MEDIA_TYPE* mt =
+        reinterpret_cast<AM_MEDIA_TYPE*>(CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE)));
+    if (!mt) return E_OUTOFMEMORY;
+    make_video_type(mt, w, h);
+    *ppmt = mt;
+    return S_OK;
+}
+
+STDMETHODIMP LBVcamOutputPin::GetNumberOfCapabilities(int* piCount, int* piSize) {
+    std::fprintf(stderr, "[lb_vcam] IAMStreamConfig::GetNumberOfCapabilities\n");
+    if (!piCount || !piSize) return E_POINTER;
+    *piCount = 1;
+    *piSize = sizeof(VIDEO_STREAM_CONFIG_CAPS);
+    return S_OK;
+}
+
+STDMETHODIMP LBVcamOutputPin::GetStreamCaps(int iIndex, AM_MEDIA_TYPE** ppmt, BYTE* pSCC) {
+    std::fprintf(stderr, "[lb_vcam] IAMStreamConfig::GetStreamCaps(i=%d)\n", iIndex);
+    if (!ppmt || !pSCC) return E_POINTER;
+    if (iIndex != 0) return S_FALSE;
+    int w = 0, h = 0;
+    current_size(&w, &h);
+
+    AM_MEDIA_TYPE* mt =
+        reinterpret_cast<AM_MEDIA_TYPE*>(CoTaskMemAlloc(sizeof(AM_MEDIA_TYPE)));
+    if (!mt) return E_OUTOFMEMORY;
+    make_video_type(mt, w, h);
+    *ppmt = mt;
+
+    VIDEO_STREAM_CONFIG_CAPS* caps = reinterpret_cast<VIDEO_STREAM_CONFIG_CAPS*>(pSCC);
+    memset(caps, 0, sizeof(*caps));
+    caps->guid = FORMAT_VideoInfo;
+    caps->VideoStandard = 0; // 非模拟视频源
+    caps->InputSize.cx = w;
+    caps->InputSize.cy = h;
+    caps->MinCroppingSize.cx = w;
+    caps->MinCroppingSize.cy = h;
+    caps->MaxCroppingSize.cx = w;
+    caps->MaxCroppingSize.cy = h;
+    caps->CropGranularityX = 1;
+    caps->CropGranularityY = 1;
+    caps->MinOutputSize.cx = w;
+    caps->MinOutputSize.cy = h;
+    caps->MaxOutputSize.cx = w;
+    caps->MaxOutputSize.cy = h;
+    caps->OutputGranularityX = 1;
+    caps->OutputGranularityY = 1;
+    caps->MinFrameInterval = 333333; // 30fps
+    caps->MaxFrameInterval = 333333;
+    const LONG bps = static_cast<LONG>(w) * h * 2 * 30;
+    caps->MinBitsPerSecond = bps;
+    caps->MaxBitsPerSecond = bps;
+    return S_OK;
+}
+
+// ---- IKsPropertySet ----
+// ffmpeg 打开采集设备时会 Get(AMPROPSETID_Pin, AM_PROPERTY_PIN_CATEGORY)：
+// 只有返回 PIN_CATEGORY_CAPTURE 的 output pin 才被认作采集 pin。
+STDMETHODIMP LBVcamOutputPin::Set(REFGUID, DWORD, LPVOID, DWORD, LPVOID, DWORD) {
+    return E_NOTIMPL; // 本属性集只读
+}
+
+STDMETHODIMP LBVcamOutputPin::Get(REFGUID guidPropSet, DWORD dwPropID, LPVOID,
+                                  DWORD, LPVOID pPropData, DWORD cbPropData,
+                                  DWORD* pcbReturned) {
+    if (pcbReturned) *pcbReturned = 0;
+    if (!IsEqualGUID(guidPropSet, kAMPROPSETID_Pin)) return E_PROP_SET_UNSUPPORTED;
+
+    if (dwPropID == kAmPropertyPinCategory) {
+        if (pcbReturned) *pcbReturned = sizeof(GUID);
+        if (!pPropData || cbPropData < sizeof(GUID)) return S_OK; // 仅查询大小
+        *reinterpret_cast<GUID*>(pPropData) = kPIN_CATEGORY_CAPTURE;
+        std::fprintf(stderr, "[lb_vcam] KsProperty: PIN_CATEGORY_CAPTURE returned\n");
+        return S_OK;
+    }
+    if (dwPropID == kAmPropertyPinName) {
+        const wchar_t* name = L"Capture";
+        const DWORD need = static_cast<DWORD>((wcslen(name) + 1) * sizeof(wchar_t));
+        if (pcbReturned) *pcbReturned = need;
+        if (!pPropData || cbPropData < need) return S_OK;
+        memcpy(pPropData, name, need);
+        return S_OK;
+    }
+    return E_PROP_ID_UNSUPPORTED;
+}
+
+STDMETHODIMP LBVcamOutputPin::QuerySupported(REFGUID guidPropSet, DWORD dwPropID,
+                                             DWORD* pTypeSupport) {
+    if (!pTypeSupport) return E_POINTER;
+    if (IsEqualGUID(guidPropSet, kAMPROPSETID_Pin) &&
+        (dwPropID == kAmPropertyPinCategory || dwPropID == kAmPropertyPinName)) {
+        *pTypeSupport = kKsPropertySupportGet;
+        return S_OK;
+    }
+    return E_PROP_SET_UNSUPPORTED;
+}
+STDMETHODIMP LBVcamOutputPin::QueryAccept(const AM_MEDIA_TYPE* pmt) {    std::fprintf(stderr, "[lb_vcam] QueryAccept (maj=%d sub=%d fmtt=%d)\n",
                  pmt ? pmt->majortype.Data1 : -1,
                  pmt ? pmt->subtype.Data1 : -1,
                  pmt ? pmt->formattype.Data1 : -1);
