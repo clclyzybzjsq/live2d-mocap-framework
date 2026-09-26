@@ -35,8 +35,6 @@ bool cubism_available() {
 }
 
 std::unique_ptr<AvatarRenderer> create_avatar_renderer(const Live2dModelInfo& model) {
-                 cubism_available() ? 1 : 0, model.usable() ? 1 : 0,
-                 model.moc3.toLocal8Bit().constData());
 #ifdef LB_WITH_CUBISM
     if (model.usable()) {
         auto cubism = std::make_unique<CubismAvatarRenderer>();

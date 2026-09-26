@@ -199,8 +199,6 @@ void ModelsPage::on_row_activated(int row) {
 }
 
 void ModelsPage::apply_selection(const QString& model_json, bool emit_signal) {
-                 model_json.toLocal8Bit().constData(), emit_signal ? 1 : 0,
-                 selected_json_.toLocal8Bit().constData());
     if (model_json.isEmpty() || model_json == selected_json_) return;
     selected_json_ = model_json;
     QSettings().setValue(QLatin1String(kSettingsCurrent), model_json);
