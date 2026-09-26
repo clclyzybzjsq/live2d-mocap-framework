@@ -8,6 +8,7 @@
 #include <GL/glew.h>
 
 #include <cstdio>
+#include <cstring>
 
 // WGL 扩展常量（不在标准头文件里）
 #define WGL_CONTEXT_MAJOR_VERSION_ARB 0x2091
@@ -102,6 +103,21 @@ bool try_wgl(int major, int minor, int profile_bit, const char* label) {
     const auto* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
     printf("  %-22s -> %s | %s | profile=%s\n", label, ver ? ver : "?", renderer ? renderer : "?",
            profile_of());
+
+    // 打印关键能力，用于与 Qt 上下文对比（Cubism 的 ES2 后端依赖这些）
+    GLint vao = 0, vbo = 0, fbo = 0, texunits = 0;
+    glGetIntegerv(GL_MAX_VERTEX_ATTRIBS, &vao);
+    glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &texunits);
+    const auto* exts = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+    auto has = [&](const char* name) {
+        return exts && std::strstr(exts, name) != nullptr;
+    };
+    (void)vbo;
+    (void)fbo;
+    printf("       attribs=%d texunits=%d | VAO_arb=%d EXT_fbo=%d shader=%d\n", vao, texunits,
+           has("GL_ARB_vertex_array_object") ? 1 : 0, has("GL_EXT_framebuffer_object") ? 1 : 0,
+           has("GL_ARB_shader_objects") ? 1 : 0);
+    printf("       extensions 长度=%zu\n", exts ? std::strlen(exts) : 0);
 
     wglMakeCurrent(nullptr, nullptr);
     wglDeleteContext(glrc);

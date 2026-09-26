@@ -1,13 +1,44 @@
 #include "cubism_runtime.h"
 
+#include <windows.h>
+
+#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <mutex>
+#include <string>
 
 #include "CubismFramework.hpp"
 
 namespace lb::ui {
+
+void cubism_log(const char* fmt, ...) {
+    static const bool enabled = []() {
+        const char* v = std::getenv("LB_CUBISM_LOG");
+        return !(v && v[0] == '0');
+    }();
+    if (!enabled) return;
+
+    // 写到 exe 同目录的固定文件：GUI 程序的 stderr 重定向在本环境下不可靠
+    wchar_t path[MAX_PATH] = {0};
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
+    std::wstring p(path);
+    const size_t slash = p.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+        p = p.substr(0, slash + 1);
+    } else {
+        p.clear();
+    }
+    p += L"cubism_debug.log";
+    FILE* f = _wfopen(p.c_str(), L"a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(f, fmt, ap);
+    va_end(ap);
+    fclose(f);
+}
 
 namespace {
 
@@ -80,6 +111,7 @@ void log_cb(const Live2D::Cubism::Framework::csmChar* msg) {
 } // namespace
 
 bool CubismRuntime::acquire() {
+    cubism_log("[runtime] acquire 进入 (refs=%d)\n", g_refs);
     std::lock_guard<std::mutex> lock(g_mutex);
     using namespace Live2D::Cubism::Framework;
     if (g_refs == 0) {
@@ -87,7 +119,9 @@ bool CubismRuntime::acquire() {
         g_option.LoggingLevel = CubismFramework::Option::LogLevel_Warning;
         g_option.LoadFileFunction = load_file_cb;
         g_option.ReleaseBytesFunction = release_bytes_cb;
-        if (!CubismFramework::StartUp(&g_allocator, &g_option)) return false;
+        const csmBool ok = CubismFramework::StartUp(&g_allocator, &g_option);
+        cubism_log("[runtime] StartUp 返回 %d\n", ok ? 1 : 0);
+        if (!ok) return false;
         CubismFramework::Initialize();
     }
     ++g_refs;

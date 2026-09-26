@@ -7,8 +7,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdarg>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <string>
 
 #include "CubismFramework.hpp"
 #include "CubismModelSettingJson.hpp"
@@ -33,18 +36,30 @@ namespace lb::ui {
 class CubismModelRuntime final : public CubismUserModel {
 public:
     bool load(const std::string& model_json, int w, int h) {
+        cubism_log("[runtime] load 开始: %s\n", model_json.c_str());
         const size_t slash = model_json.find_last_of("/\\");
         dir_ = (slash == std::string::npos) ? std::string() : model_json.substr(0, slash + 1);
 
         const CubismRuntime::FileBytes json = CubismRuntime::read_file(model_json);
-        if (!json.ok()) return false;
+        if (!json.ok()) {
+            cubism_log("[runtime] model3.json 读取失败\n");
+            return false;
+        }
         CubismModelSettingJson setting(json.data.data(),
                                        static_cast<csmSizeInt>(json.data.size()));
 
         const CubismRuntime::FileBytes moc = CubismRuntime::read_file(dir_ + setting.GetModelFileName());
-        if (!moc.ok()) return false;
+        if (!moc.ok()) {
+            cubism_log("[runtime] moc3 读取失败: %s\n", (dir_ + setting.GetModelFileName()).c_str());
+            return false;
+        }
         LoadModel(const_cast<csmByte*>(moc.data.data()), static_cast<csmSizeInt>(moc.data.size()));
-        if (!GetModel()) return false;
+        if (!GetModel()) {
+            cubism_log("[runtime] LoadModel 失败（moc3 无效？）\n");
+            return false;
+        }
+        cubism_log("[runtime] 模型就绪: 参数=%d 绘制对象=%d\n", GetModel()->GetParameterCount(),
+                   GetModel()->GetDrawableCount());
 
         CreateRenderer(static_cast<csmUint32>(w), static_cast<csmUint32>(h));
 
@@ -230,12 +245,12 @@ bool CubismAvatarRenderer::ensure_gl() {
     // 后端在 Core Profile 下渲染出空白画面。原生 WGL 能正确拿到兼容上下文。
     gl_ctx_ = std::make_unique<WglOffscreenContext>();
     if (!gl_ctx_->create(4, 6)) {
-        std::fprintf(stderr, "[cubism] 原生 GL 上下文创建失败\n");
+        cubism_log( "[cubism] 原生 GL 上下文创建失败\n");
         gl_ctx_.reset();
         return false;
     }
     if (!gl_ctx_->make_current()) {
-        std::fprintf(stderr, "[cubism] GL 上下文 makeCurrent 失败\n");
+        cubism_log( "[cubism] GL 上下文 makeCurrent 失败\n");
         gl_ctx_.reset();
         return false;
     }
@@ -246,18 +261,18 @@ bool CubismAvatarRenderer::ensure_gl() {
     const GLenum err = glewInit();
     if (err != GLEW_OK) {
         const auto* msg = reinterpret_cast<const char*>(glewGetErrorString(err));
-        std::fprintf(stderr, "[cubism] glewInit 失败: %s\n", msg ? msg : "?");
+        cubism_log( "[cubism] glewInit 失败: %s\n", msg ? msg : "?");
         gl_ctx_->done_current();
         return false;
     }
     if (glCreateShader == nullptr || glGenBuffers == nullptr) {
-        std::fprintf(stderr, "[cubism] GL 函数指针不可用，上下文异常\n");
+        cubism_log( "[cubism] GL 函数指针不可用，上下文异常\n");
         gl_ctx_->done_current();
         return false;
     }
     {
         const auto* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        std::fprintf(stderr, "[cubism] GL %s  上下文 Profile=%s\n", ver ? ver : "?",
+        cubism_log( "[cubism] GL %s  上下文 Profile=%s\n", ver ? ver : "?",
                      gl_ctx_->profile_name());
     }
     // 兜底：Core Profile 下必须绑定 VAO 才能发起绘制（正常路径下已是兼容 Profile）
@@ -330,7 +345,7 @@ bool CubismAvatarRenderer::create_fbo() {
     const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        std::fprintf(stderr, "[cubism] FBO 不完整: 0x%04X\n", status);
+        cubism_log( "[cubism] FBO 不完整: 0x%04X\n", status);
         return false;
     }
     fbo_ready_ = true;
@@ -339,31 +354,38 @@ bool CubismAvatarRenderer::create_fbo() {
 
 bool CubismAvatarRenderer::initialize(const Live2dModelInfo& model) {
     if (!model.usable()) {
-        std::fprintf(stderr, "[cubism] 模型不可用，跳过初始化\n");
+        cubism_log( "[cubism] 模型不可用，跳过初始化\n");
         return false;
     }
 
     // GL 上下文必须在调用线程创建（约定为 UI 线程）
     if (!ensure_gl()) {
-        std::fprintf(stderr, "[cubism] GL 初始化失败，回退占位渲染\n");
+        cubism_log( "[cubism] GL 初始化失败，回退占位渲染\n");
         return false;
     }
     if (!gl_ctx_->make_current()) {
-        std::fprintf(stderr, "[cubism] makeCurrent 失败\n");
+        cubism_log( "[cubism] makeCurrent 失败\n");
         return false;
     }
 
-    if (!build_model(model)) {
-        std::fprintf(stderr, "[cubism] 模型加载失败\n");
+    // 先建好 FBO 并绑定，再初始化 Cubism：Cubism 在建渲染器时会按当前的
+    // framebuffer 尺寸创建剪裁遮罩缓冲，若不绑定就会用离屏窗口的默认
+    // framebuffer（8x8），后续绘制尺寸不匹配会触发 GL_INVALID_OPERATION
+    if (!create_fbo()) {
         gl_ctx_->done_current();
         return false;
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+    glViewport(0, 0, width_, height_);
 
-    if (!create_fbo()) {
+    if (!build_model(model)) {
+        cubism_log("[cubism] 模型加载失败\n");
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
         release_gl();
         gl_ctx_->done_current();
         return false;
     }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
     gl_ctx_->done_current();
     ready_ = true;
@@ -428,7 +450,7 @@ void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
         {
             static int dbg = 0;
             if (dbg++ < 4) {
-                std::fprintf(stderr, "[cubism] tick 读回: err=0x%04X 非透明=%ld/%zu (%.1f%%)\n",
+                cubism_log( "[cubism] tick 读回: err=0x%04X 非透明=%ld/%zu (%.1f%%)\n",
                              rerr, opaque, readback_.size() / 4,
                              100.0 * static_cast<double>(opaque) /
                                  (static_cast<double>(readback_.size()) / 4.0));

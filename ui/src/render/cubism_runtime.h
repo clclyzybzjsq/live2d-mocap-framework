@@ -8,6 +8,11 @@
 
 namespace lb::ui {
 
+// 诊断日志：写到 exe 同目录的 cubism_debug.log。
+// UI 是 GUI 程序，stderr 重定向在本环境下时有时无，写文件才可靠。
+// 环境变量 LB_CUBISM_LOG=0 可关闭。
+void cubism_log(const char* fmt, ...);
+
 // Cubism Framework 的进程级初始化（StartUp / Initialize / Dispose）。
 //
 // Framework 内部是全局单例，多处独立调用 StartUp 会互相破坏，因此统一由这里
