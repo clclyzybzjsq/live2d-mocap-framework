@@ -11,15 +11,13 @@
 
 #include "avatar_renderer.h"
 
-// 注意：本头文件刻意不包含 Qt 的 OpenGL 头（QOpenGLContext 等）。
-// 实现文件必须先包含 <GL/glew.h> 再包含 Qt GL 头，否则 glew 会报
+// 实现文件必须先包含 <GL/glew.h> 再包含任何 Qt GL 头，否则 glew 会报
 // "gl.h included before glew.h" 并引发 GL 类型重复定义。
-class QOpenGLContext;
-class QOffscreenSurface;
-class QOpenGLFramebufferObject;
-
+// GL 上下文用原生 WGL（见 wgl_context.h）：Qt 在 Widgets 应用里拿不到
+// Compatibility Profile，Cubism 在 Core Profile 下会渲染出空白画面。
 namespace lb::ui {
 
+class WglOffscreenContext;
 class CubismModelRuntime;
 
 // 基于 Live2D Cubism 原生 SDK 的头像渲染器（OpenGL 离屏渲染）。
@@ -50,24 +48,30 @@ public:
 
 private:
     bool ensure_gl();
+    bool create_fbo();
     bool build_model(const Live2dModelInfo& model);
     void release_gl();
     void apply_params(const lb::core::SemanticParams& sem);
     void render_frame();
 
-    std::unique_ptr<QOpenGLContext> context_;
-    std::unique_ptr<QOffscreenSurface> surface_;
-    std::unique_ptr<QOpenGLFramebufferObject> fbo_;
+    std::unique_ptr<WglOffscreenContext> gl_ctx_;
     std::unique_ptr<CubismModelRuntime> runtime_;
     std::vector<unsigned int> textures_;
     // Core Profile 下没有绑定 VAO 就不允许绘制（Cubism 的 ES2 后端不自建 VAO），
     // 因此这里准备一个空 VAO 供每帧绘制前绑定
     unsigned int vao_ = 0;
+    // 自管 FBO：Qt 的 QOpenGLFramebufferObject 依赖 Qt 自己的当前上下文，
+    // 无法与原生 WGL 上下文配合使用
+    unsigned int fbo_ = 0;
+    unsigned int color_tex_ = 0;
+    unsigned int depth_rbo_ = 0;
+    bool fbo_ready_ = false;
 
     std::string model_dir_;
 
     mutable std::mutex mutex_;
     QImage front_; // 最近一次渲染结果（供 render() 读取）
+    std::vector<uint8_t> readback_; // glReadPixels 的紧凑缓冲
 
     int width_ = 640;
     int height_ = 480;

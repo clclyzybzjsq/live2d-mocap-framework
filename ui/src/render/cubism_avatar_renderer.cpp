@@ -3,12 +3,7 @@
 // glew.h 必须先于任何 Qt/系统 GL 头
 #include <GL/glew.h>
 
-#include <QOpenGLContext>
-#include <QOpenGLFramebufferObject>
-#include <QOpenGLFramebufferObjectFormat>
-#include <QOffscreenSurface>
 #include <QPainter>
-#include <QSurfaceFormat>
 
 #include <algorithm>
 #include <cmath>
@@ -28,6 +23,7 @@
 #include "Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp"
 
 #include "cubism_runtime.h"
+#include "wgl_context.h"
 
 using namespace Live2D::Cubism::Framework;
 
@@ -218,40 +214,32 @@ private:
 CubismAvatarRenderer::CubismAvatarRenderer() = default;
 
 CubismAvatarRenderer::~CubismAvatarRenderer() {
-    if (gl_ready_ && context_ && surface_) {
-        context_->makeCurrent(surface_.get());
+    if (gl_ready_ && gl_ctx_) {
+        gl_ctx_->make_current();
         release_gl();
-        context_->doneCurrent();
+        gl_ctx_->done_current();
     }
 }
 
 bool CubismAvatarRenderer::ensure_gl() {
     if (gl_ready_) return true;
 
-    // 显式构造格式，不使用 defaultFormat()：Qt Widgets 应用会把进程默认格式
-    // 变成 4.6/Core Profile，而 Cubism 的 OpenGL ES2 后端在 Core Profile 下
-    // 会大量 GL_INVALID_OPERATION 并渲染出空白画面。
-    // 实测（tools/gl_format_probe）：4.6 + CompatibilityProfile 在本机 Intel
-    // 驱动上能真正拿到 Compatibility 上下文。
-    QSurfaceFormat format;
-    format.setVersion(4, 6);
-    format.setProfile(QSurfaceFormat::CompatibilityProfile);
-    format.setDepthBufferSize(24);
-    format.setStencilBufferSize(8);
+    // 用原生 WGL 创建 Compatibility Profile 上下文。
+    // Qt 的 QOpenGLContext 在 Widgets 应用里即使显式请求 CompatibilityProfile
+    // 也只能拿到 Core Profile（实测 profile=Core），而 Cubism 的 OpenGL ES2
+    // 后端在 Core Profile 下渲染出空白画面。原生 WGL 能正确拿到兼容上下文。
+    gl_ctx_ = std::make_unique<WglOffscreenContext>();
+    if (!gl_ctx_->create(4, 6)) {
+        std::fprintf(stderr, "[cubism] 原生 GL 上下文创建失败\n");
+        gl_ctx_.reset();
+        return false;
+    }
+    if (!gl_ctx_->make_current()) {
+        std::fprintf(stderr, "[cubism] GL 上下文 makeCurrent 失败\n");
+        gl_ctx_.reset();
+        return false;
+    }
 
-    context_ = std::make_unique<QOpenGLContext>();
-    context_->setFormat(format);
-    if (!context_->create()) {
-        std::fprintf(stderr, "[cubism] GL 上下文创建失败\n");
-        return false;
-    }
-    surface_ = std::make_unique<QOffscreenSurface>();
-    surface_->setFormat(context_->format());
-    surface_->create();
-    if (!surface_->isValid() || !context_->makeCurrent(surface_.get())) {
-        std::fprintf(stderr, "[cubism] 离屏 surface 不可用\n");
-        return false;
-    }
     // GLEW 必须在 GL 上下文为 current 时初始化；失败即致命——
     // 否则后续 GL 调用会跳到空函数指针（表现为 shader 加载阶段崩溃）
     glewExperimental = GL_TRUE;
@@ -259,32 +247,26 @@ bool CubismAvatarRenderer::ensure_gl() {
     if (err != GLEW_OK) {
         const auto* msg = reinterpret_cast<const char*>(glewGetErrorString(err));
         std::fprintf(stderr, "[cubism] glewInit 失败: %s\n", msg ? msg : "?");
-        context_->doneCurrent();
+        gl_ctx_->done_current();
         return false;
     }
     if (glCreateShader == nullptr || glGenBuffers == nullptr) {
         std::fprintf(stderr, "[cubism] GL 函数指针不可用，上下文异常\n");
-        context_->doneCurrent();
+        gl_ctx_->done_current();
         return false;
     }
     {
         const auto* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        const QSurfaceFormat got = context_->format();
-        std::fprintf(stderr, "[cubism] GL %s (上下文 %d.%d profile=%d)\n", ver ? ver : "?",
-                     got.majorVersion(), got.minorVersion(), static_cast<int>(got.profile()));
+        std::fprintf(stderr, "[cubism] GL %s  上下文 Profile=%s\n", ver ? ver : "?",
+                     gl_ctx_->profile_name());
     }
-    // Core Profile 要求必须绑定 VAO 才能发起绘制。Cubism 的 OpenGL ES2 后端
-    // 自身不创建 VAO，在 Core Profile 上下文里会静默失败（GL_INVALID_OPERATION
-    // 且画面空白），这里统一准备一个空 VAO。
+    // 兜底：Core Profile 下必须绑定 VAO 才能发起绘制（正常路径下已是兼容 Profile）
     if (GLEW_VERSION_3_0) {
         glGenVertexArrays(1, &vao_);
-        if (vao_ != 0) {
-            glBindVertexArray(vao_);
-            std::fprintf(stderr, "[cubism] 已创建 VAO（Core Profile 兼容）\n");
-        }
+        if (vao_ != 0) glBindVertexArray(vao_);
     }
     glGetError(); // 清掉 glewInit 可能留下的 INVALID_ENUM
-    context_->doneCurrent();
+    gl_ctx_->done_current();
     gl_ready_ = true;
     return true;
 }
@@ -305,13 +287,54 @@ void CubismAvatarRenderer::release_gl() {
         glDeleteVertexArrays(1, &vao_);
         vao_ = 0;
     }
+    if (fbo_ != 0) {
+        glDeleteFramebuffers(1, &fbo_);
+        fbo_ = 0;
+    }
+    if (color_tex_ != 0) {
+        glDeleteTextures(1, &color_tex_);
+        color_tex_ = 0;
+    }
+    if (depth_rbo_ != 0) {
+        glDeleteRenderbuffers(1, &depth_rbo_);
+        depth_rbo_ = 0;
+    }
+    fbo_ready_ = false;
     if (runtime_) {
         runtime_->release_textures();
         runtime_->DeleteRenderer();
         runtime_.reset();
         CubismRuntime::release();
     }
-    fbo_.reset();
+}
+
+// 自管 FBO：颜色纹理 + 深度/模板 renderbuffer（Cubism 的剪裁遮罩需要模板）
+bool CubismAvatarRenderer::create_fbo() {
+    glGenFramebuffers(1, &fbo_);
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+
+    glGenTextures(1, &color_tex_);
+    glBindTexture(GL_TEXTURE_2D, color_tex_);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width_, height_, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_tex_, 0);
+
+    glGenRenderbuffers(1, &depth_rbo_);
+    glBindRenderbuffer(GL_RENDERBUFFER, depth_rbo_);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width_, height_);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
+                              depth_rbo_);
+
+    const GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        std::fprintf(stderr, "[cubism] FBO 不完整: 0x%04X\n", status);
+        return false;
+    }
+    fbo_ready_ = true;
+    return true;
 }
 
 bool CubismAvatarRenderer::initialize(const Live2dModelInfo& model) {
@@ -325,29 +348,24 @@ bool CubismAvatarRenderer::initialize(const Live2dModelInfo& model) {
         std::fprintf(stderr, "[cubism] GL 初始化失败，回退占位渲染\n");
         return false;
     }
-    if (!context_->makeCurrent(surface_.get())) {
+    if (!gl_ctx_->make_current()) {
         std::fprintf(stderr, "[cubism] makeCurrent 失败\n");
         return false;
     }
 
     if (!build_model(model)) {
         std::fprintf(stderr, "[cubism] 模型加载失败\n");
-        context_->doneCurrent();
+        gl_ctx_->done_current();
         return false;
     }
 
-    QOpenGLFramebufferObjectFormat fmt;
-    fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
-    fmt.setSamples(0);
-    fbo_ = std::make_unique<QOpenGLFramebufferObject>(width_, height_, fmt);
-    if (!fbo_->isValid()) {
-        std::fprintf(stderr, "[cubism] FBO 创建失败\n");
+    if (!create_fbo()) {
         release_gl();
-        context_->doneCurrent();
+        gl_ctx_->done_current();
         return false;
     }
 
-    context_->doneCurrent();
+    gl_ctx_->done_current();
     ready_ = true;
     return true;
 }
@@ -360,8 +378,7 @@ void CubismAvatarRenderer::apply_params(const lb::core::SemanticParams& sem) {
 }
 
 void CubismAvatarRenderer::render_frame() {
-    fbo_->bind();
-    // Core Profile 下必须绑定 VAO，否则所有绘制调用都是无效操作
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
     if (vao_ != 0) glBindVertexArray(vao_);
     glViewport(0, 0, width_, height_);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -370,12 +387,12 @@ void CubismAvatarRenderer::render_frame() {
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     runtime_->draw_frame(width_, height_, zoom_, offset_x_, offset_y_);
-    fbo_->release();
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
     if (!ready_) return;
-    if (!context_->makeCurrent(surface_.get())) return;
+    if (!gl_ctx_->make_current()) return;
 
     // 时间步长：驱动呼吸与物理演算
     const auto now = std::chrono::steady_clock::now();
@@ -393,12 +410,42 @@ void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
     runtime_->update(dt_seconds_, sem.face_detected);
     render_frame();
 
-    const QImage frame = fbo_->toImage().convertToFormat(QImage::Format_ARGB32);
-    {
+    // 自管 FBO 的读回（Qt 的 toImage 依赖 Qt 上下文，这里直接用 glReadPixels）
+    if (fbo_ready_) {
+        const size_t pitch = static_cast<size_t>(width_) * 4u;
+        readback_.resize(pitch * static_cast<size_t>(height_));
+        glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+        glPixelStorei(GL_PACK_ALIGNMENT, 4);
+        glReadPixels(0, 0, width_, height_, GL_BGRA, GL_UNSIGNED_BYTE, readback_.data());
+        const GLenum rerr = glGetError();
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        // 统计非透明像素，确认确实渲染出了内容
+        long opaque = 0;
+        for (size_t i = 3; i < readback_.size(); i += 4) {
+            if (readback_[i] > 8) ++opaque;
+        }
+        {
+            static int dbg = 0;
+            if (dbg++ < 4) {
+                std::fprintf(stderr, "[cubism] tick 读回: err=0x%04X 非透明=%ld/%zu (%.1f%%)\n",
+                             rerr, opaque, readback_.size() / 4,
+                             100.0 * static_cast<double>(opaque) /
+                                 (static_cast<double>(readback_.size()) / 4.0));
+            }
+        }
+
+        // OpenGL 原点在左下角，QImage 在左上角，需按行翻转
+        QImage frame(width_, height_, QImage::Format_ARGB32);
+        for (int y = 0; y < height_; ++y) {
+            const uint8_t* src =
+                readback_.data() + pitch * static_cast<size_t>(height_ - 1 - y);
+            std::memcpy(frame.scanLine(y), src, pitch);
+        }
         std::lock_guard<std::mutex> lock(mutex_);
         front_ = frame;
     }
-    context_->doneCurrent();
+    gl_ctx_->done_current();
 }
 
 void CubismAvatarRenderer::render(QImage& target, const lb::core::SemanticParams&) {

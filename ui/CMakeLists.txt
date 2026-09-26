@@ -27,6 +27,8 @@ add_executable(lb_ui
     src/render/live2d_model_library.cpp
     src/render/vcam_compositor.h
     src/render/vcam_compositor.cpp
+    src/render/wgl_context.h
+    src/render/wgl_context.cpp
     src/widgets/toggle_switch.h
     src/widgets/toggle_switch.cpp
     src/widgets/slider_row.h
@@ -107,6 +109,7 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
         src/render/avatar_renderer.cpp
         src/render/cubism_avatar_renderer.cpp
         src/render/cubism_runtime.cpp
+        src/render/wgl_context.cpp
         src/render/live2d_model_library.cpp
         src/render/vcam_compositor.cpp
     )
@@ -121,7 +124,16 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
     if(NOT MSVC)
         target_compile_options(lb_cubism_renderer_test PRIVATE -fpermissive)
     endif()
-    # GL 上下文格式探测（排查 Core/Compatibility Profile 问题）
+    # 原生 WGL 上下文探测（绕过 Qt 格式协商）
+if(LB_BUILD_GL_PROBE)
+    add_executable(lb_wgl_probe ${CMAKE_SOURCE_DIR}/tools/wgl_probe.cpp)
+    target_include_directories(lb_wgl_probe PRIVATE "${LB_GLEW_DIR}/include")
+    target_compile_definitions(lb_wgl_probe PRIVATE GLEW_STATIC)
+    target_link_libraries(lb_wgl_probe PRIVATE lb_glew opengl32)
+    target_compile_features(lb_wgl_probe PRIVATE cxx_std_17)
+endif()
+
+# GL 上下文格式探测（排查 Core/Compatibility Profile 问题）
 option(LB_BUILD_GL_PROBE "Build GL format probe" OFF)
 if(LB_BUILD_GL_PROBE)
     add_executable(lb_gl_format_probe ${CMAKE_SOURCE_DIR}/tools/gl_format_probe.cpp)
