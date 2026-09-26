@@ -1,4 +1,4 @@
-﻿# Build script: configure and compile the Windows project skeleton.
+# Build script: configure and compile the Windows project skeleton.
 # Requires CMake, Ninja, MinGW-w64 (UCRT) and Qt6 mingw build -- see docs/assessment-plan.md.
 $ErrorActionPreference = 'Stop'
 
@@ -58,4 +58,15 @@ if (-not (Test-Path "$root\build\CMakeCache.txt")) {
 & $cmake --build "$root\build"
 if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 
-Write-Output "Build OK: $root\build\ui\lb_ui.exe"
+# ---- deploy runtime next to the UI exe ----
+# 让 build\ui\lb_ui.exe 可以脱离 PATH 直接双击运行：Qt6*.dll + 平台插件 +
+# MinGW 运行库（libgcc/libstdc++/libwinpthread）全部随包。
+# 缺这一步时双击会报“找不到部分 DLL 运行库”。
+$uiExe = "$root\build\ui\lb_ui.exe"
+$deployQt = Join-Path $qtBin "windeployqt.exe"
+if ((Test-Path $uiExe) -and (Test-Path $deployQt)) {
+    & $deployQt --no-translations --compiler-runtime --no-system-d3d-compiler --no-opengl-sw $uiExe | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
+}
+
+Write-Output "Build OK: $uiExe (Qt runtime deployed)"
