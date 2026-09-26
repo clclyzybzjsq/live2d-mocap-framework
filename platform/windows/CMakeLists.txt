@@ -29,6 +29,11 @@ target_include_directories(lb_vcam_filter PRIVATE
     include
     ${CMAKE_SOURCE_DIR}/core/include
 )
+# 排查用跟踪日志（默认关闭：filter 运行在消费方进程里，不应污染其 stderr）
+option(LB_VCAM_TRACE "Enable vcam filter stderr tracing" OFF)
+if(LB_VCAM_TRACE)
+    target_compile_definitions(lb_vcam_filter PRIVATE LB_VCAM_TRACE)
+endif()
 target_link_libraries(lb_vcam_filter PRIVATE
     strmiids ole32 oleaut32 uuid
 )

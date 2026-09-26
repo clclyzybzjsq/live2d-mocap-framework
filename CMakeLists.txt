@@ -51,4 +51,9 @@ if(LB_BUILD_VCAM_FLOW)
     add_executable(lb_vcam_write tools/vcam_write_test.cpp)
     target_link_libraries(lb_vcam_write PRIVATE lb_core lb_win)
     target_compile_features(lb_vcam_write PRIVATE cxx_std_17)
+
+    # 持续喂帧（模拟应用写端）——验证 应用 -> 共享内存 -> 消费方 的端到端链路
+    add_executable(lb_vcam_feed tools/vcam_feed.cpp)
+    target_link_libraries(lb_vcam_feed PRIVATE lb_core lb_win)
+    target_compile_features(lb_vcam_feed PRIVATE cxx_std_17)
 endif()
