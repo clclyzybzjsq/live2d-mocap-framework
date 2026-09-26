@@ -65,8 +65,20 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed" }
 $uiExe = "$root\build\ui\lb_ui.exe"
 $deployQt = Join-Path $qtBin "windeployqt.exe"
 if ((Test-Path $uiExe) -and (Test-Path $deployQt)) {
-    & $deployQt --no-translations --compiler-runtime --no-system-d3d-compiler --no-opengl-sw $uiExe | Out-Null
+    & $deployQt --no-translations --no-system-d3d-compiler --no-opengl-sw $uiExe | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "windeployqt failed" }
 }
 
-Write-Output "Build OK: $uiExe (Qt runtime deployed)"
+# 运行库必须来自本工具链（GCC16 msvcrt）。
+# 注意：不要用 windeployqt --compiler-runtime —— 它会带入 Qt 自带的 GCC13 运行库，
+# 与 GCC16 产物不匹配，启动时报“无法定位程序输入点”。Qt DLL 由更新的
+# libstdc++ 驱动是安全的（ABI 向后兼容），反过来则不行。
+foreach ($dll in @("libgcc_s_seh-1.dll", "libstdc++-6.dll", "libwinpthread-1.dll")) {
+    $src = Join-Path $mingwBin $dll
+    if (Test-Path $src) {
+        if (Test-Path "$root\build\ui") { Copy-Item $src "$root\build\ui\" -Force }
+        Copy-Item $src "$root\build\" -Force   # 冒烟/测试工具也要能独立运行
+    }
+}
+
+Write-Output "Build OK: $uiExe (Qt runtime + GCC16 runtime deployed)"
