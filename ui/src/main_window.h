@@ -23,6 +23,7 @@ class ModelsPage;
 class MocapPage;
 class OutputPage;
 class SettingsPage;
+class VcamCompositor;
 struct FrameSnapshot;
 
 // 主窗口。布局按方案 7.3：顶栏（唯一主按钮）+ 左导航 + 内容区 + 状态栏。
@@ -77,6 +78,8 @@ private:
     // 管线与浮窗
     std::unique_ptr<lb::core::MotionPipeline> pipeline_;
     std::shared_ptr<lb::core::IVirtualCamera> vcam_;
+    // 虚拟摄像头输出合成：默认 Live2D 形象 + 虚化背景
+    std::unique_ptr<VcamCompositor> vcam_compositor_;
     FloatWindowWidget* float_window_ = nullptr;
     QTimer* ui_timer_ = nullptr;
     bool running_ = false;

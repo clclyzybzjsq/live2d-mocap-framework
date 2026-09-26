@@ -20,6 +20,8 @@ public:
     explicit OutputPage(QWidget* parent = nullptr);
 
     lb::core::VirtualCameraFormat vcam_config() const;
+    // 画面内容：默认输出 Live2D 形象 + 虚化背景；该开关打开时只输出背景（无 Live2D）
+    bool vcam_background_only() const;
     void set_vcam_checked(bool on);
     void set_vcam_status(const QString& text);
 
@@ -29,11 +31,13 @@ signals:
     void floating_window_scale(double scale);
     void floating_window_opacity(double opacity);
     void virtual_camera_toggled(bool on);
+    void vcam_background_only_toggled(bool on);
 
 private:
     QComboBox* vcam_resolution_ = nullptr;
     QComboBox* vcam_fps_ = nullptr;
     ToggleSwitch* vcam_switch_ = nullptr;
+    ToggleSwitch* vcam_bg_only_ = nullptr;
     QLabel* vcam_status_ = nullptr;
 };
 

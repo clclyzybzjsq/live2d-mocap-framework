@@ -19,6 +19,7 @@
 #include "pages/models_page.h"
 #include "pages/mocap_page.h"
 #include "pages/output_page.h"
+#include "render/vcam_compositor.h"
 #include "pages/settings_page.h"
 
 namespace lb::ui {
@@ -100,6 +101,14 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // 虚拟摄像头：开关 -> 注册/启动（实例由 MainWindow 持有，管线线程喂帧）
     connect(output_page_, &OutputPage::virtual_camera_toggled, this,
             &MainWindow::set_vcam_enabled);
+
+    // 虚拟摄像头画面内容：默认 Live2D + 虚化背景；打开"仅输出背景"则隐藏 Live2D
+    vcam_compositor_ = std::make_unique<VcamCompositor>();
+    connect(output_page_, &OutputPage::vcam_background_only_toggled, this, [this](bool on) {
+        if (!vcam_compositor_) return;
+        vcam_compositor_->set_content(
+            on ? VcamContent::BackgroundOnly : VcamContent::Live2dOverBlurredBackground);
+    });
 
     build_tray();
 
@@ -324,10 +333,14 @@ void MainWindow::on_pipeline_frame(const lb::core::FrameView& frame,
                                    const lb::core::ModelParamList& params,
                                    const lb::core::SemanticParams& semantic,
                                    const lb::core::PipelineStats& stats) {
-    // 虚拟摄像头喂帧：管线回调线程直推（vcam 内部有锁）
-    // 注：回调携带的 frame 为管线内部分配的缓冲区，拷贝到共享内存后即可释放
+    // 虚拟摄像头喂帧：管线回调线程直推（vcam 内部有锁）。
+    // 输出内容不是相机原始帧，而是合成画面：默认 Live2D 形象 + 虚化背景
+    // （"仅输出背景"开启时只输出背景，不含 Live2D）。
     if (vcam_ && vcam_->is_running()) {
-        vcam_->push_frame(frame);
+        const lb::core::FrameView* out = nullptr;
+        if (vcam_compositor_) out = vcam_compositor_->compose(frame, semantic);
+        // 合成失败（格式未知等）时回退为原始帧，保证设备始终有画面
+        vcam_->push_frame(out ? *out : frame);
     }
 
     FrameSnapshot snap;

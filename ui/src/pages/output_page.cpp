@@ -52,8 +52,18 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     vcam_status_->setObjectName("HintText");
     vcam_layout->addRow(QStringLiteral("设备状态"), vcam_status_);
 
+    // 画面内容：默认 Live2D 形象 + 背景虚化；打开此开关则只输出背景（无 Live2D）
+    vcam_bg_only_ = new ToggleSwitch(vcam_box);
+    vcam_layout->addRow(QStringLiteral("仅输出背景"), vcam_bg_only_);
+    auto* content_hint = new QLabel(
+        QStringLiteral("默认输出 Live2D 形象 + 虚化背景；打开后只输出背景"), vcam_box);
+    content_hint->setObjectName("HintText");
+    vcam_layout->addRow(QString(), content_hint);
+
     connect(vcam_switch_, &ToggleSwitch::clicked, this,
             &OutputPage::virtual_camera_toggled);
+    connect(vcam_bg_only_, &ToggleSwitch::clicked, this,
+            &OutputPage::vcam_background_only_toggled);
     root->addWidget(vcam_box);
 
     // ---- 通道 B：桌面浮窗 ----
@@ -99,6 +109,10 @@ lb::core::VirtualCameraFormat OutputPage::vcam_config() const {
     fmt.fps = vcam_fps_->currentIndex() == 0 ? 30 : 60;
     fmt.preferred_format = lb::core::PixelFormat::YUY2;
     return fmt;
+}
+
+bool OutputPage::vcam_background_only() const {
+    return vcam_bg_only_ && vcam_bg_only_->isChecked();
 }
 
 void OutputPage::set_vcam_checked(bool on) {
