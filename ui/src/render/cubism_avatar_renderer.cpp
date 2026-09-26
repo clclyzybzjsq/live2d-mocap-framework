@@ -1,16 +1,19 @@
 #include "cubism_avatar_renderer.h"
 
-#include <QImage>
+// glew.h 必须先于任何 Qt/系统 GL 头
+#include <GL/glew.h>
+
+#include <QOpenGLContext>
+#include <QOpenGLFramebufferObject>
+#include <QOpenGLFramebufferObjectFormat>
+#include <QOffscreenSurface>
 #include <QPainter>
+#include <QSurfaceFormat>
 
 #include <algorithm>
 #include <cmath>
-#include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <string>
-#include <vector>
 
 #include "CubismFramework.hpp"
 #include "CubismModelSettingJson.hpp"
@@ -21,63 +24,44 @@
 #include "Math/CubismModelMatrix.hpp"
 #include "Model/CubismModel.hpp"
 #include "Model/CubismUserModel.hpp"
-#include "Rendering/D3D11/CubismDeviceInfo_D3D11.hpp"
-#include "Rendering/D3D11/CubismRenderer_D3D11.hpp"
+#include "Rendering/OpenGL/CubismOffscreenManager_OpenGLES2.hpp"
+#include "Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp"
 
 #include "cubism_runtime.h"
-#include "d3d11_context.h"
 
 using namespace Live2D::Cubism::Framework;
 
 namespace lb::ui {
 
-// ---- 模型运行时：加载 moc3/纹理 + 应用参数 + 绘制（D3D11 后端） ----
+// ---- 模型运行时：加载 moc3/纹理 + 应用参数 + 绘制 ----
 class CubismModelRuntime final : public CubismUserModel {
 public:
-    bool load(const std::string& model_json, int w, int h, D3d11Device& dev) {
-        cubism_log("[runtime] load 开始: %s\n", model_json.c_str());
+    bool load(const std::string& model_json, int w, int h) {
         const size_t slash = model_json.find_last_of("/\\");
         dir_ = (slash == std::string::npos) ? std::string() : model_json.substr(0, slash + 1);
 
         const CubismRuntime::FileBytes json = CubismRuntime::read_file(model_json);
-        if (!json.ok()) {
-            cubism_log("[runtime] model3.json 读取失败\n");
-            return false;
-        }
+        if (!json.ok()) return false;
         CubismModelSettingJson setting(json.data.data(),
                                        static_cast<csmSizeInt>(json.data.size()));
 
         const CubismRuntime::FileBytes moc = CubismRuntime::read_file(dir_ + setting.GetModelFileName());
-        if (!moc.ok()) {
-            cubism_log("[runtime] moc3 读取失败: %s\n", (dir_ + setting.GetModelFileName()).c_str());
-            return false;
-        }
+        if (!moc.ok()) return false;
         LoadModel(const_cast<csmByte*>(moc.data.data()), static_cast<csmSizeInt>(moc.data.size()));
-        if (!GetModel()) {
-            cubism_log("[runtime] LoadModel 失败（moc3 无效？）\n");
-            return false;
-        }
-        cubism_log("[runtime] 模型就绪: 参数=%d 绘制对象=%d\n", GetModel()->GetParameterCount(),
-                   GetModel()->GetDrawableCount());
-
-        // 关联 Cubism 的 D3D11 设备信息（首次调用会建立着色器与渲染状态）
-        Rendering::CubismDeviceInfo_D3D11::GetDeviceInfo(dev.device());
+        if (!GetModel()) return false;
 
         CreateRenderer(static_cast<csmUint32>(w), static_cast<csmUint32>(h));
 
         for (csmInt32 i = 0; i < setting.GetTextureCount(); ++i) {
             const csmChar* name = setting.GetTextureFileName(i);
             if (!name || name[0] == '\0') continue;
-            const QImage img(QString::fromLocal8Bit((dir_ + name).c_str()));
-            ID3D11ShaderResourceView* srv = create_texture_from_image(dev, img);
-            if (srv) {
-                GetRenderer<Rendering::CubismRenderer_D3D11>()->BindTexture(i, srv);
-                textures_.push_back(srv);
-            } else {
-                cubism_log("[runtime] 纹理上传失败: %s\n", name);
+            const unsigned int tex = upload_texture(dir_ + name);
+            if (tex != 0) {
+                GetRenderer<Rendering::CubismRenderer_OpenGLES2>()->BindTexture(i, tex);
+                textures_.push_back(tex);
             }
         }
-        GetRenderer<Rendering::CubismRenderer_D3D11>()->IsPremultipliedAlpha(false);
+        GetRenderer<Rendering::CubismRenderer_OpenGLES2>()->IsPremultipliedAlpha(false);
 
         setting.GetLayoutMap(layout_);
         GetModelMatrix()->SetupFromLayout(layout_);
@@ -121,10 +105,15 @@ public:
         Csm::CubismModel* m = GetModel();
         if (!m) return;
 
-        // 每帧从布局重建模型矩阵：SetWidth 是把变换乘到当前矩阵上，
-        // 若直接连续调用会逐帧累加导致模型迅速移出画面
+        Rendering::CubismOffscreenManager_OpenGLES2::GetInstance()->BeginFrameProcess();
+
+        // 每帧从布局重建模型矩阵：SetWidth/Translate 都是把变换乘到当前矩阵上，
+        // 若直接连续调用，偏移会逐帧累加导致模型迅速移出画面
         GetModelMatrix()->SetupFromLayout(layout_);
         GetModelMatrix()->SetWidth(2.0f * zoom);
+        if (offset_x != 0.0f || offset_y != 0.0f) {
+            GetModelMatrix()->Translate(offset_x, offset_y);
+        }
 
         CubismMatrix44 projection;
         projection.LoadIdentity();
@@ -138,20 +127,13 @@ public:
         } else {
             projection.Scale(canvas_aspect / view_aspect, 1.0f);
         }
-        // 取景平移放在投影空间：±1 约等于整幅画面宽度/高度的位移，
-        // 与 UI 滑块语义一致（放在模型矩阵里会被 SetWidth 缩放吞掉）
-        if (offset_x != 0.0f || offset_y != 0.0f) {
-            projection.Translate(offset_x * 2.0f, offset_y * 2.0f);
-        }
         projection.MultiplyByMatrix(GetModelMatrix());
 
-        auto* renderer = GetRenderer<Rendering::CubismRenderer_D3D11>();
-        if (!renderer) {
-            cubism_log("[runtime] D3D11 渲染器为空\n");
-            return;
-        }
-        renderer->SetMvpMatrix(&projection);
-        renderer->DrawModel();
+        GetRenderer<Rendering::CubismRenderer_OpenGLES2>()->SetMvpMatrix(&projection);
+        GetRenderer<Rendering::CubismRenderer_OpenGLES2>()->DrawModel();
+
+        Rendering::CubismOffscreenManager_OpenGLES2::GetInstance()->EndFrameProcess();
+        Rendering::CubismOffscreenManager_OpenGLES2::GetInstance()->ReleaseStaleRenderTextures();
     }
 
     Csm::CubismModel* model() { return GetModel(); }
@@ -201,15 +183,30 @@ public:
     bool has_breath() const { return _breath != nullptr; }
 
     void release_textures() {
-        for (ID3D11ShaderResourceView* srv : textures_) {
-            if (srv) srv->Release();
-        }
+        for (unsigned int t : textures_) glDeleteTextures(1, &t);
         textures_.clear();
     }
 
 private:
+    static unsigned int upload_texture(const std::string& path) {
+        QImage img(QString::fromLocal8Bit(path.c_str()));
+        if (img.isNull()) return 0;
+        img = img.convertToFormat(QImage::Format_RGBA8888);
+        GLuint tex = 0;
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, img.width(), img.height(), 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, img.constBits());
+        // 必须生成 mipmap：否则纹理不完整，采样恒为黑色
+        glGenerateMipmap(GL_TEXTURE_2D);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        return tex;
+    }
+
     std::string dir_;
-    std::vector<ID3D11ShaderResourceView*> textures_;
+    std::vector<unsigned int> textures_;
     csmMap<csmString, csmFloat32> layout_; // 布局信息：每帧据此重建模型矩阵
     float idle_time_ = 0.0f;               // 待机微动的时间累积
 };
@@ -218,30 +215,63 @@ private:
 
 CubismAvatarRenderer::CubismAvatarRenderer() = default;
 
-CubismAvatarRenderer::~CubismAvatarRenderer() { release_gpu(); }
+CubismAvatarRenderer::~CubismAvatarRenderer() {
+    if (gl_ready_ && context_ && surface_) {
+        context_->makeCurrent(surface_.get());
+        release_gl();
+        context_->doneCurrent();
+    }
+}
 
-bool CubismAvatarRenderer::ensure_device() {
-    if (device_ready_) return true;
-    d3d_ = std::make_unique<D3d11Device>();
-    if (!d3d_->create()) {
-        cubism_log("[cubism] D3D11 设备创建失败\n");
-        d3d_.reset();
+bool CubismAvatarRenderer::ensure_gl() {
+    if (gl_ready_) return true;
+
+    QSurfaceFormat format = QSurfaceFormat::defaultFormat();
+    format.setDepthBufferSize(24);
+    format.setStencilBufferSize(8);
+
+    context_ = std::make_unique<QOpenGLContext>();
+    context_->setFormat(format);
+    if (!context_->create()) {
+        std::fprintf(stderr, "[cubism] GL 上下文创建失败\n");
         return false;
     }
-    cubism_log("[cubism] D3D11 设备就绪\n");
-    device_ready_ = true;
+    surface_ = std::make_unique<QOffscreenSurface>();
+    surface_->setFormat(context_->format());
+    surface_->create();
+    if (!surface_->isValid() || !context_->makeCurrent(surface_.get())) {
+        std::fprintf(stderr, "[cubism] 离屏 surface 不可用\n");
+        return false;
+    }
+    // GLEW 必须在 GL 上下文为 current 时初始化；失败即致命——
+    // 否则后续 GL 调用会跳到空函数指针（表现为 shader 加载阶段崩溃）
+    glewExperimental = GL_TRUE;
+    const GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        const auto* msg = reinterpret_cast<const char*>(glewGetErrorString(err));
+        std::fprintf(stderr, "[cubism] glewInit 失败: %s\n", msg ? msg : "?");
+        context_->doneCurrent();
+        return false;
+    }
+    if (glCreateShader == nullptr || glGenBuffers == nullptr) {
+        std::fprintf(stderr, "[cubism] GL 函数指针不可用，上下文异常\n");
+        context_->doneCurrent();
+        return false;
+    }
+    {
+        const auto* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        std::fprintf(stderr, "[cubism] GL %s\n", ver ? ver : "?");
+    }
+    glGetError(); // 清掉 glewInit 可能留下的 INVALID_ENUM
+    context_->doneCurrent();
+    gl_ready_ = true;
     return true;
 }
 
 bool CubismAvatarRenderer::build_model(const Live2dModelInfo& model) {
-    cubism_log("[cubism] build_model 进入\n");
-    if (!CubismRuntime::acquire()) {
-        cubism_log("[cubism] CubismRuntime::acquire 失败\n");
-        return false;
-    }
+    if (!CubismRuntime::acquire()) return false;
     runtime_ = std::make_unique<CubismModelRuntime>();
-    if (!runtime_->load(model.model_json.toLocal8Bit().toStdString(), width_, height_, *d3d_)) {
-        cubism_log("[cubism] 模型运行时加载失败\n");
+    if (!runtime_->load(model.model_json.toLocal8Bit().toStdString(), width_, height_)) {
         runtime_.reset();
         CubismRuntime::release();
         return false;
@@ -249,44 +279,41 @@ bool CubismAvatarRenderer::build_model(const Live2dModelInfo& model) {
     return true;
 }
 
-void CubismAvatarRenderer::release_gpu() {
-    rt_.reset();
+void CubismAvatarRenderer::release_gl() {
     if (runtime_) {
         runtime_->release_textures();
         runtime_->DeleteRenderer();
         runtime_.reset();
         CubismRuntime::release();
     }
-    d3d_.reset();
-    device_ready_ = false;
-    ready_ = false;
+    fbo_.reset();
 }
 
 bool CubismAvatarRenderer::initialize(const Live2dModelInfo& model) {
-    if (!model.usable()) {
-        cubism_log("[cubism] 模型不可用，跳过初始化\n");
-        return false;
-    }
-    if (!ensure_device()) {
-        cubism_log("[cubism] D3D11 初始化失败，回退占位渲染\n");
-        return false;
-    }
+    if (!model.usable()) return false;
 
-    rt_ = std::make_unique<D3d11RenderTarget>();
-    if (!rt_->create(*d3d_, width_, height_)) {
-        cubism_log("[cubism] 渲染目标创建失败\n");
-        release_gpu();
-        return false;
-    }
+    // GL 上下文必须在调用线程创建（约定为 UI 线程）
+    if (!ensure_gl()) return false;
+    if (!context_->makeCurrent(surface_.get())) return false;
 
     if (!build_model(model)) {
-        cubism_log("[cubism] 模型加载失败\n");
-        release_gpu();
+        context_->doneCurrent();
         return false;
     }
 
+    QOpenGLFramebufferObjectFormat fmt;
+    fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    fmt.setSamples(0);
+    fbo_ = std::make_unique<QOpenGLFramebufferObject>(width_, height_, fmt);
+    if (!fbo_->isValid()) {
+        std::fprintf(stderr, "[cubism] FBO 创建失败\n");
+        release_gl();
+        context_->doneCurrent();
+        return false;
+    }
+
+    context_->doneCurrent();
     ready_ = true;
-    cubism_log("[cubism] 初始化完成\n");
     return true;
 }
 
@@ -298,14 +325,20 @@ void CubismAvatarRenderer::apply_params(const lb::core::SemanticParams& sem) {
 }
 
 void CubismAvatarRenderer::render_frame() {
-    ID3D11DeviceContext* ctx = d3d_->context();
-    rt_->bind(ctx);
-    rt_->clear(ctx);
+    fbo_->bind();
+    glViewport(0, 0, width_, height_);
+    glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
     runtime_->draw_frame(width_, height_, zoom_, offset_x_, offset_y_);
+    fbo_->release();
 }
 
 void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
     if (!ready_) return;
+    if (!context_->makeCurrent(surface_.get())) return;
 
     // 时间步长：驱动呼吸与物理演算
     const auto now = std::chrono::steady_clock::now();
@@ -323,26 +356,12 @@ void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
     runtime_->update(dt_seconds_, sem.face_detected);
     render_frame();
 
-    // 从渲染目标读回（D3D 的行序自上而下，与 QImage 一致，无需翻转）
-    if (rt_ && rt_->readback(*d3d_, d3d_->context(), readback_)) {
-        {
-            static int dbg = 0;
-            if (dbg++ < 4) {
-                long opaque = 0;
-                for (int y = 0; y < readback_.height(); ++y) {
-                    const QRgb* line = reinterpret_cast<const QRgb*>(readback_.constScanLine(y));
-                    for (int x = 0; x < readback_.width(); ++x) {
-                        if (qAlpha(line[x]) > 8) ++opaque;
-                    }
-                }
-                const double total = static_cast<double>(readback_.width()) * readback_.height();
-                cubism_log("[cubism] tick 读回: 非透明=%ld/%.0f (%.1f%%)\n", opaque, total,
-                           100.0 * static_cast<double>(opaque) / total);
-            }
-        }
+    const QImage frame = fbo_->toImage().convertToFormat(QImage::Format_ARGB32);
+    {
         std::lock_guard<std::mutex> lock(mutex_);
-        front_ = readback_;
+        front_ = frame;
     }
+    context_->doneCurrent();
 }
 
 void CubismAvatarRenderer::render(QImage& target, const lb::core::SemanticParams&) {
@@ -370,12 +389,6 @@ void CubismAvatarRenderer::set_render_size(int w, int h) {
         width_ = w;
         height_ = h;
     }
-}
-
-void CubismAvatarRenderer::set_view(float zoom, float offset_x, float offset_y) {
-    zoom_ = zoom;
-    offset_x_ = offset_x;
-    offset_y_ = offset_y;
 }
 
 void CubismAvatarRenderer::set_zoom(float z) { zoom_ = z; }

@@ -27,8 +27,8 @@ add_executable(lb_ui
     src/render/live2d_model_library.cpp
     src/render/vcam_compositor.h
     src/render/vcam_compositor.cpp
-    src/render/d3d11_context.h
-    src/render/d3d11_context.cpp
+    src/render/wgl_context.h
+    src/render/wgl_context.cpp
     src/widgets/toggle_switch.h
     src/widgets/toggle_switch.cpp
     src/widgets/slider_row.h
@@ -45,7 +45,7 @@ if(LB_WITH_CUBISM)
     target_include_directories(lb_ui PRIVATE
         "${LB_CUBISM_SDK_DIR}/Core/include"
         "${LB_CUBISM_SDK_DIR}/Framework/src")
-    target_link_libraries(lb_ui PRIVATE Framework "${LB_CUBISM_CORE_IMPLIB}" d3d11 dxgi d3dcompiler)
+    target_link_libraries(lb_ui PRIVATE Framework "${LB_CUBISM_CORE_IMPLIB}")
 if(LB_WITH_CUBISM)
     target_link_libraries(lb_ui PRIVATE Qt6::OpenGL)
 endif()

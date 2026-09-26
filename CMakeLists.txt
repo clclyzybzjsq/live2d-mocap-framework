@@ -39,12 +39,13 @@ if(LB_WITH_CUBISM)
     target_compile_definitions(lb_glew PRIVATE GLEW_NO_GLU)
 
     # 官方 Framework 的 Rendering/CMakeLists.txt 用 FRAMEWORK_SOURCE 选择渲染后端目录
-    set(FRAMEWORK_SOURCE "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/D3D11")
+    set(FRAMEWORK_SOURCE "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/OpenGL")
     set(RENDER_INCLUDE_PATH "")
     add_subdirectory("${LB_CUBISM_SDK_DIR}/Framework"
                      "${CMAKE_BINARY_DIR}/cubism_framework" EXCLUDE_FROM_ALL)
     # 桌面 OpenGL 目标（Cubism 后端据此选择 GL 头）
-    # D3D11 后端：与 Qt 解耦，避开 OpenGL 在 Qt Widgets 下的 Profile 问题。
+    # OpenGL 后端（配合 Qt 的 QOpenGLContext：实测该组合可正常渲染）
+    target_compile_definitions(Framework PRIVATE CSM_TARGET_WIN_GL)
     # MinGW 自带的 DirectXMath 是简化版（缺 XMMATRIX），必须用官方完整版，
     # 且要排在系统 include 之前
     if(EXISTS "${LB_DIRECTXMATH_INC}/DirectXMath.h")
