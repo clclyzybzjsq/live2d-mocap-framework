@@ -27,3 +27,5 @@ inference/models/
 
 # local toolchain (this repo never vendors tools)
 third_party/
+# cubism generated import lib / def
+cubism_link/
