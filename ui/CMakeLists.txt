@@ -40,11 +40,15 @@ if(LB_WITH_CUBISM)
         "${LB_CUBISM_SDK_DIR}/Core/include"
         "${LB_CUBISM_SDK_DIR}/Framework/src")
     target_link_libraries(lb_ui PRIVATE Framework "${LB_CUBISM_CORE_IMPLIB}")
-    # 运行时需要官方 Core dll 与 exe 同目录
+    # 运行时需要官方 Core dll 与 Cubism 的 GLSL 源码（渲染器按相对路径
+    # FrameworkShaders/ 加载），两者都必须与 exe 同目录
     add_custom_command(TARGET lb_ui POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${LB_CUBISM_CORE_DLL}" "$<TARGET_FILE_DIR:lb_ui>/Live2DCubismCore.dll"
-        COMMENT "Copying Live2DCubismCore.dll next to lb_ui.exe")
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/OpenGL/Shaders/Standard"
+                "$<TARGET_FILE_DIR:lb_ui>/FrameworkShaders"
+        COMMENT "Copying Live2DCubismCore.dll and Cubism shaders next to lb_ui.exe")
 endif()
 
 # 合成器离屏验证（不需 UI/相机/设备）：背景虚化 + Live2D 叠加 + 两种内容模式
@@ -70,4 +74,22 @@ if(LB_BUILD_LIVE2D_TEST)
     target_include_directories(lb_live2d_model_test PRIVATE src)
     target_link_libraries(lb_live2d_model_test PRIVATE Qt6::Core lb_core)
     target_compile_features(lb_live2d_model_test PRIVATE cxx_std_17)
+endif()
+
+# Cubism 离屏渲染验证（需要 SDK + 离屏 GL 上下文）
+option(LB_BUILD_CUBISM_TEST "Build cubism offscreen render test" OFF)
+if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
+    add_executable(lb_cubism_model_test ${CMAKE_SOURCE_DIR}/tools/cubism_model_test.cpp)
+    target_include_directories(lb_cubism_model_test PRIVATE
+        "${LB_CUBISM_SDK_DIR}/Core/include"
+        "${LB_CUBISM_SDK_DIR}/Framework/src")
+    target_link_libraries(lb_cubism_model_test PRIVATE
+        Qt6::Gui Qt6::OpenGL Framework "${LB_CUBISM_CORE_IMPLIB}")
+    target_compile_features(lb_cubism_model_test PRIVATE cxx_std_17)
+    add_custom_command(TARGET lb_cubism_model_test POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LB_CUBISM_CORE_DLL}" "$<TARGET_FILE_DIR:lb_cubism_model_test>/Live2DCubismCore.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${LB_CUBISM_SDK_DIR}/Framework/src/Rendering/OpenGL/Shaders/Standard"
+                "$<TARGET_FILE_DIR:lb_cubism_model_test>/FrameworkShaders")
 endif()
