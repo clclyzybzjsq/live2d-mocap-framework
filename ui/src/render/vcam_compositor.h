@@ -2,6 +2,7 @@
 
 #include <QImage>
 
+#include <atomic>
 #include <cstdint>
 #include <vector>
 
@@ -9,6 +10,8 @@
 #include "lb/core/types.h"
 
 namespace lb::ui {
+
+class AvatarRenderer;
 
 // 虚拟摄像头输出内容。
 enum class VcamContent : uint8_t {
@@ -18,11 +21,16 @@ enum class VcamContent : uint8_t {
 
 // 把「相机帧 + 语义参数」合成为虚拟摄像头输出帧（BGRA32）。
 // 背景虚化用降采样往返近似（视觉上接近高斯，成本极低，可每帧调用）。
+// 人物部分由 AvatarRenderer 绘制（占位渲染 / Cubism 渲染可替换）。
 // 返回的帧视图指向内部缓冲，仅在下次 compose 前有效（与管线回调同步使用）。
 class VcamCompositor {
 public:
     void set_content(VcamContent c) { content_ = c; }
     VcamContent content() const { return content_; }
+
+    // 设置形象渲染器（不持有所有权）。未设置时回退为内置占位绘制。
+    void set_avatar_renderer(AvatarRenderer* r) { renderer_.store(r); }
+    AvatarRenderer* avatar_renderer() const { return renderer_.load(); }
 
     // camera 须为 BGRA32 格式；无法合成时返回 nullptr。
     const lb::core::FrameView* compose(const lb::core::FrameView& camera,
@@ -30,6 +38,7 @@ public:
 
 private:
     VcamContent content_ = VcamContent::Live2dOverBlurredBackground;
+    std::atomic<AvatarRenderer*> renderer_{nullptr};
     QImage canvas_;
     std::vector<uint8_t> buffer_;
     lb::core::FrameView view_;

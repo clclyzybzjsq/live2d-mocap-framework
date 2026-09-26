@@ -3,6 +3,7 @@ add_library(lb_core STATIC
     src/mapping.cpp
     src/solve.cpp
     src/motion_pipeline.cpp
+    src/cubism_param_map.cpp
 )
 
 target_include_directories(lb_core PUBLIC include)

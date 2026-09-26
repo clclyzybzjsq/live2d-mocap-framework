@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "avatar_painter.h"
+#include "avatar_renderer.h"
 
 namespace lb::ui {
 
@@ -57,9 +58,16 @@ const lb::core::FrameView* VcamCompositor::compose(const lb::core::FrameView& ca
 
     // Live2D 形象叠加（默认内容；仅背景模式下跳过）
     if (content_ == VcamContent::Live2dOverBlurredBackground) {
-        QPainter p(&canvas_);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        paint_avatar(p, w, h, sem);
+        AvatarRenderer* r = renderer_.load();
+        if (r) {
+            // 渲染器自行决定线程策略（占位渲染直接 QPainter，Cubism 内部处理 GL 线程）
+            r->render(canvas_, sem);
+        } else {
+            // 未设置渲染器时的内置回退
+            QPainter p(&canvas_);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            paint_avatar(p, w, h, sem);
+        }
     }
 
     // 输出到紧凑 BGRA 缓冲（QImage 每行有对齐填充，写端要求连续 pitch）

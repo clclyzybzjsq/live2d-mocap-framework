@@ -17,6 +17,10 @@ add_executable(lb_ui
     src/pages/settings_page.cpp
     src/render/avatar_painter.h
     src/render/avatar_painter.cpp
+    src/render/avatar_renderer.h
+    src/render/avatar_renderer.cpp
+    src/render/live2d_model_library.h
+    src/render/live2d_model_library.cpp
     src/render/vcam_compositor.h
     src/render/vcam_compositor.cpp
     src/widgets/toggle_switch.h
@@ -40,4 +44,16 @@ if(LB_BUILD_VCAM_COMPOSE_TEST)
     target_include_directories(lb_vcam_compose_test PRIVATE src)
     target_link_libraries(lb_vcam_compose_test PRIVATE Qt6::Gui lb_core)
     target_compile_features(lb_vcam_compose_test PRIVATE cxx_std_17)
+endif()
+
+# 模型库/参数映射验证（不需要 Cubism SDK）
+option(LB_BUILD_LIVE2D_TEST "Build live2d model library + param map test" OFF)
+if(LB_BUILD_LIVE2D_TEST)
+    add_executable(lb_live2d_model_test
+        ${CMAKE_SOURCE_DIR}/tools/live2d_model_test.cpp
+        src/render/live2d_model_library.cpp
+    )
+    target_include_directories(lb_live2d_model_test PRIVATE src)
+    target_link_libraries(lb_live2d_model_test PRIVATE Qt6::Core lb_core)
+    target_compile_features(lb_live2d_model_test PRIVATE cxx_std_17)
 endif()
