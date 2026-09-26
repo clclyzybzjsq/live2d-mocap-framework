@@ -23,6 +23,8 @@
 #include "pages/mocap_page.h"
 #include "pages/output_page.h"
 #include "render/avatar_renderer.h"
+#include "render/cubism_avatar_renderer.h"
+#include "render/cubism_render_surface.h"
 #include "render/live2d_model_library.h"
 #include "render/vcam_compositor.h"
 #include "pages/settings_page.h"
@@ -131,22 +133,30 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
     connect(output_page_, &OutputPage::view_changed, this,
             [this](double zoom, double offset_x, double offset_y) {
-                if (avatar_renderer_) avatar_renderer_->set_view(zoom, offset_x, offset_y);
+                if (render_surface_) render_surface_->set_view(zoom, offset_x, offset_y);
                 QSettings settings;
                 settings.setValue(QStringLiteral("view/zoom"), zoom);
                 settings.setValue(QStringLiteral("view/offset_x"), offset_x);
                 settings.setValue(QStringLiteral("view/offset_y"), offset_y);
             });
 
-    // 形象渲染器：初始为占位实现（无模型也能出画面）。
-    // 模型页若已恢复上次选择，on_model_activated 会替换为对应模型的渲染器。
-    avatar_renderer_ = create_avatar_renderer(current_model_);
-    if (avatar_renderer_) {
-        avatar_renderer_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
-                                  output_page_->view_offset_y());
-    }
-    if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(avatar_renderer_.get());
-    if (float_window_) float_window_->set_avatar_renderer(avatar_renderer_.get());
+    // 形象渲染：用一个移到屏幕外的 QOpenGLWidget 作为渲染宿主。
+    // Qt Widgets 应用里自建的离屏 GL 上下文渲染不出内容（全透明），
+    // 而 QOpenGLWidget 提供的上下文可以正常工作。
+    render_surface_ = new CubismRenderSurface(this);
+    connect(render_surface_, &CubismRenderSurface::initialized, this, [this](bool ok) {
+        // 渲染器实例由 render_surface_ 持有；这里只把裸指针交给消费者
+        if (CubismAvatarRenderer* r = render_surface_->renderer()) {
+            if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(r);
+            if (float_window_) float_window_->set_avatar_renderer(r);
+            render_surface_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
+                                      output_page_->view_offset_y());
+        }
+        status_model_->setText(ok ? QStringLiteral("模型: %1（Cubism）").arg(current_model_.name)
+                                  : QStringLiteral("模型: %1（渲染器初始化失败）")
+                                        .arg(current_model_.name));
+    });
+    render_surface_->show(); // 屏幕外（构造时已 move 到 (-10000,-10000)）
     if (models_page_ && !models_page_->current_model_json().isEmpty()) {
         on_model_activated(models_page_->current_model_json());
     }
@@ -160,13 +170,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // 这里驱动，这样动捕未启动时（无相机帧）虚拟摄像头依然输出待机形象。
     avatar_timer_ = new QTimer(this);
     connect(avatar_timer_, &QTimer::timeout, this, [this]() {
-        if (!avatar_renderer_) return;
         lb::core::SemanticParams sem;
         {
             std::lock_guard<std::mutex> lock(semantic_mutex_);
             sem = last_semantic_;
         }
-        avatar_renderer_->tick(sem);
+        // 驱动屏幕外渲染宿主：set_semantics + update 会在 Qt 的 paintGL 中渲染一帧
+        if (render_surface_) {
+            render_surface_->set_semantics(sem);
+            render_surface_->update();
+        }
 
         if (!vcam_ || !vcam_->is_running() || !vcam_compositor_) return;
         lb::core::FrameView cam;
@@ -394,22 +407,16 @@ void MainWindow::on_model_activated(const QString& model_json) {
     }
     current_model_ = info;
 
-    std::unique_ptr<AvatarRenderer> fresh = create_avatar_renderer(current_model_);
-    if (!fresh) return;
-
-    // 旧渲染器延迟到下一次替换时回收：管线回调线程可能正在使用它
-    retired_renderer_ = std::move(avatar_renderer_);
-    avatar_renderer_ = std::move(fresh);
-
-    if (avatar_renderer_ && output_page_) {
-        avatar_renderer_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
-                                  output_page_->view_offset_y());
+    // 交给屏幕外渲染宿主；GL 初始化完成后会通过 initialized 信号接上消费者
+    if (render_surface_) {
+        render_surface_->set_model(info);
+        if (!render_surface_->renderer()) {
+            status_model_->setText(
+                QStringLiteral("模型: %1（等待 GL 初始化）").arg(info.name));
+            return;
+        }
     }
-    if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(avatar_renderer_.get());
-    if (float_window_) float_window_->set_avatar_renderer(avatar_renderer_.get());
-
-    status_model_->setText(
-        QStringLiteral("模型: %1（%2）").arg(info.name, avatar_renderer_->name()));
+    status_model_->setText(QStringLiteral("模型: %1（Cubism）").arg(info.name));
 }
 
 void MainWindow::apply_startup_options(bool auto_vcam, bool show_float,

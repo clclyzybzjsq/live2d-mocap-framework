@@ -85,7 +85,7 @@ add_subdirectory(platform/windows)
 
 # 应用层：Qt6 桌面界面（黑色主题，无表情符号，按 docs/assessment-plan.md 第七节）
 if(LB_BUILD_UI)
-    find_package(Qt6 QUIET COMPONENTS Widgets OpenGL)
+    find_package(Qt6 QUIET COMPONENTS Widgets OpenGL OpenGLWidgets)
     if(Qt6_FOUND)
         add_subdirectory(ui)
     else()

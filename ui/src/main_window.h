@@ -22,6 +22,7 @@ class QTimer;
 namespace lb::ui {
 
 class AvatarRenderer;
+class CubismRenderSurface;
 class FloatWindowWidget;
 class ModelsPage;
 class MocapPage;
@@ -91,9 +92,9 @@ private:
     // 虚拟摄像头输出合成：默认 Live2D 形象 + 虚化背景
     std::unique_ptr<VcamCompositor> vcam_compositor_;
     // 形象渲染器（浮窗与虚拟摄像头合成共用同一实例）
-    std::unique_ptr<AvatarRenderer> avatar_renderer_;
-    // 上一次的渲染器：延迟回收，避免管线回调线程仍在使用时被销毁
-    std::unique_ptr<AvatarRenderer> retired_renderer_;
+    // 屏幕外的 QOpenGLWidget：为 Cubism 提供可用的 GL 上下文与渲染时机
+    // （Qt Widgets 应用里自建离屏上下文渲染不出内容，见 cubism_render_surface.h）
+    CubismRenderSurface* render_surface_ = nullptr;
     Live2dModelInfo current_model_;
     // Cubism 渲染需要 GL 上下文，只能在 UI 线程驱动
     QTimer* avatar_timer_ = nullptr;

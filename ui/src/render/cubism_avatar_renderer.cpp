@@ -4,6 +4,7 @@
 #include <GL/glew.h>
 
 #include <QOpenGLContext>
+#include <QOpenGLContext>
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFramebufferObjectFormat>
 #include <QOffscreenSurface>
@@ -235,6 +236,67 @@ void CubismAvatarRenderer::release_gl() {
         CubismRuntime::release();
     }
     fbo_.reset();
+}
+
+bool CubismAvatarRenderer::initialize_with_current_context(const Live2dModelInfo& model) {
+    // 上下文由外部（QOpenGLWidget）建立且已 current，这里不再自行创建上下文。
+    // 这是 Qt Widgets 应用里可用的路径：自建离屏上下文会渲染出全透明画面。
+    if (ready_) return true;
+    if (!model.usable()) {
+        cubism_log("[cubism] 模型不可用\n");
+        return false;
+    }
+    if (!QOpenGLContext::currentContext()) {
+        cubism_log("[cubism] 当前没有 GL 上下文（需在 initializeGL 中调用）\n");
+        return false;
+    }
+
+    if (!build_model(model)) {
+        cubism_log("[cubism] 模型加载失败\n");
+        return false;
+    }
+
+    QOpenGLFramebufferObjectFormat fmt;
+    fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
+    fmt.setSamples(0);
+    fbo_ = std::make_unique<QOpenGLFramebufferObject>(width_, height_, fmt);
+    if (!fbo_->isValid()) {
+        cubism_log("[cubism] FBO 创建失败\n");
+        release_gl();
+        return false;
+    }
+    ready_ = true;
+    cubism_log("[cubism] 已在外部上下文中初始化（%dx%d）\n", width_, height_);
+    return true;
+}
+
+void CubismAvatarRenderer::render_once(const lb::core::SemanticParams& sem) {
+    if (!ready_ || !fbo_) return;
+    apply_params(sem);
+    if (runtime_->model()) runtime_->model()->Update();
+    render_frame();
+    const QImage frame = fbo_->toImage().convertToFormat(QImage::Format_ARGB32);
+    {
+        static int dbg = 0;
+        if (dbg++ < 3) {
+            long op = 0;
+            for (int y = 0; y < frame.height(); ++y) {
+                const QRgb* ln = reinterpret_cast<const QRgb*>(frame.constScanLine(y));
+                for (int x = 0; x < frame.width(); ++x) {
+                    if (qAlpha(ln[x]) > 8) ++op;
+                }
+            }
+            cubism_log("[cubism] render_once 非透明=%ld (%.1f%%)\n", op,
+                       100.0 * op / (static_cast<double>(frame.width()) * frame.height()));
+        }
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    front_ = frame;
+}
+
+QImage CubismAvatarRenderer::current_frame() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return front_;
 }
 
 bool CubismAvatarRenderer::initialize(const Live2dModelInfo& model) {

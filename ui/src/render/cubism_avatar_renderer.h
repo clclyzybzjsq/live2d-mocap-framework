@@ -38,6 +38,17 @@ public:
     QString name() const override;
     bool model_bound() const override;
 
+    // ---- 外部上下文模式（推荐）----
+    // Qt Widgets 应用里自建的离屏 GL 上下文（QOpenGLContext + QOffscreenSurface）
+    // 会出现"渲染调用成功但产出全透明"，而 QOpenGLWidget 提供的上下文可正常工作
+    // （参考 QtLive2d 的做法）。这两个接口用于由 QOpenGLWidget 驱动渲染：
+    //   initialize_with_current_context() —— 在 initializeGL() 里调用，上下文已 current
+    //   render_once()                     —— 在 paintGL() 里调用，渲染并读回缓存
+    bool initialize_with_current_context(const Live2dModelInfo& model);
+    void render_once(const lb::core::SemanticParams& sem);
+    // 最近一次渲染结果（任意线程，加锁拷贝）
+    QImage current_frame() const;
+
     // 渲染分辨率（合成画布通常为相机尺寸 640x480）
     void set_render_size(int w, int h);
     // 模型显示缩放（1.0 为默认适配；越大模型越大）

@@ -27,8 +27,8 @@ add_executable(lb_ui
     src/render/live2d_model_library.cpp
     src/render/vcam_compositor.h
     src/render/vcam_compositor.cpp
-    src/render/wgl_context.h
-    src/render/wgl_context.cpp
+    src/render/cubism_render_surface.h
+    src/render/cubism_render_surface.cpp
     src/widgets/toggle_switch.h
     src/widgets/toggle_switch.cpp
     src/widgets/slider_row.h
@@ -47,7 +47,7 @@ if(LB_WITH_CUBISM)
         "${LB_CUBISM_SDK_DIR}/Framework/src")
     target_link_libraries(lb_ui PRIVATE Framework "${LB_CUBISM_CORE_IMPLIB}")
 if(LB_WITH_CUBISM)
-    target_link_libraries(lb_ui PRIVATE Qt6::OpenGL)
+    target_link_libraries(lb_ui PRIVATE Qt6::OpenGL Qt6::OpenGLWidgets)
 endif()
     # 运行时需要官方 Core dll 与 Cubism 的 GLSL 源码（渲染器按相对路径
     # FrameworkShaders/ 加载），两者都必须与 exe 同目录
@@ -109,7 +109,7 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
         src/render/avatar_renderer.cpp
         src/render/cubism_avatar_renderer.cpp
         src/render/cubism_runtime.cpp
-        src/render/d3d11_context.cpp
+        src/render/cubism_render_surface.cpp
         src/render/live2d_model_library.cpp
         src/render/vcam_compositor.cpp
     )
