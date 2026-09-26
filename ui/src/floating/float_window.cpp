@@ -1,6 +1,7 @@
 #include "float_window.h"
 
 #include "render/avatar_painter.h"
+#include "render/avatar_renderer.h"
 
 #include <QFrame>
 #include <QHBoxLayout>
@@ -78,6 +79,11 @@ void FloatWindowWidget::set_opacity(double opacity) {
     setWindowOpacity(std::clamp(opacity, 0.1, 1.0));
 }
 
+void FloatWindowWidget::set_avatar_renderer(AvatarRenderer* r) {
+    avatar_renderer_ = r;
+    update();
+}
+
 void FloatWindowWidget::paintEvent(QPaintEvent* event) {
     Q_UNUSED(event);
     lb::core::SemanticParams sem;
@@ -87,9 +93,19 @@ void FloatWindowWidget::paintEvent(QPaintEvent* event) {
     }
 
     QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    // 形象绘制与虚拟摄像头合成共用同一实现（render/avatar_painter）
-    paint_avatar(p, width(), height(), sem);
+
+    // 形象绘制走渲染器（与虚拟摄像头合成共用实现）；未设置时回退内置占位绘制
+    if (avatar_renderer_) {
+        if (canvas_.size() != size() || canvas_.format() != QImage::Format_ARGB32) {
+            canvas_ = QImage(size(), QImage::Format_ARGB32);
+        }
+        canvas_.fill(Qt::transparent);
+        avatar_renderer_->render(canvas_, sem);
+        p.drawImage(0, 0, canvas_);
+    } else {
+        p.setRenderHint(QPainter::Antialiasing, true);
+        paint_avatar(p, width(), height(), sem);
+    }
     p.end();
 
     // 调试信息（左下角：分辨率帧率）

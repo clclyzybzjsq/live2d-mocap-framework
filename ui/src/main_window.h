@@ -2,6 +2,7 @@
 
 #include "lb/core/motion_pipeline.h"
 #include "lb/core/virtual_camera.h"
+#include "render/live2d_model_library.h"
 
 #include <QMainWindow>
 
@@ -18,6 +19,7 @@ class QTimer;
 
 namespace lb::ui {
 
+class AvatarRenderer;
 class FloatWindowWidget;
 class ModelsPage;
 class MocapPage;
@@ -50,6 +52,8 @@ private:
                            const lb::core::ModelParamList& params,
                            const lb::core::SemanticParams& semantic,
                            const lb::core::PipelineStats& stats);
+    // 模型页选中模型 -> 重建形象渲染器（浮窗与虚拟摄像头共用）
+    void on_model_activated(const QString& model_json);
 
     // 顶栏
     QLabel* status_dot_ = nullptr;
@@ -61,6 +65,7 @@ private:
     QListWidget* nav_ = nullptr;
     QStackedWidget* pages_ = nullptr;
     MocapPage* mocap_page_ = nullptr;
+    ModelsPage* models_page_ = nullptr;
     OutputPage* output_page_ = nullptr;
 
     // 状态栏
@@ -80,6 +85,11 @@ private:
     std::shared_ptr<lb::core::IVirtualCamera> vcam_;
     // 虚拟摄像头输出合成：默认 Live2D 形象 + 虚化背景
     std::unique_ptr<VcamCompositor> vcam_compositor_;
+    // 形象渲染器（浮窗与虚拟摄像头合成共用同一实例）
+    std::unique_ptr<AvatarRenderer> avatar_renderer_;
+    // 上一次的渲染器：延迟回收，避免管线回调线程仍在使用时被销毁
+    std::unique_ptr<AvatarRenderer> retired_renderer_;
+    Live2dModelInfo current_model_;
     FloatWindowWidget* float_window_ = nullptr;
     QTimer* ui_timer_ = nullptr;
     bool running_ = false;

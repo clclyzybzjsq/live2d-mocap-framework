@@ -10,6 +10,8 @@
 
 namespace lb::ui {
 
+class AvatarRenderer;
+
 // 一次管线输出的快照（用于跨线程投递）。
 struct FrameSnapshot {
     lb::core::ModelParamList params;
@@ -35,6 +37,11 @@ public slots:
     void set_scale(double scale);
     void set_opacity(double opacity);
 
+public:
+    // 形象渲染器（不持有所有权）。未设置时回退为内置占位绘制。
+    // 与虚拟摄像头合成共用同一渲染器实例，保证两处画面一致。
+    void set_avatar_renderer(AvatarRenderer* r);
+
     bool click_through() const { return click_through_; }
 
 signals:
@@ -57,6 +64,9 @@ private:
     std::mutex mutex_;
     lb::core::SemanticParams semantic_;
     lb::core::PipelineStats stats_;
+
+    AvatarRenderer* avatar_renderer_ = nullptr; // 不持有所有权
+    QImage canvas_;                             // 渲染画布缓存（避免每帧分配）
 
     QPoint drag_offset_;
     bool dragging_ = false;

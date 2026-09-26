@@ -1,6 +1,7 @@
 #include "main_window.h"
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -19,6 +20,8 @@
 #include "pages/models_page.h"
 #include "pages/mocap_page.h"
 #include "pages/output_page.h"
+#include "render/avatar_renderer.h"
+#include "render/live2d_model_library.h"
 #include "render/vcam_compositor.h"
 #include "pages/settings_page.h"
 
@@ -56,10 +59,10 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                      QStringLiteral("输出"), QStringLiteral("设置") });
 
     pages_ = new QStackedWidget(body);
-    auto* models_page = new ModelsPage(pages_);
+    models_page_ = new ModelsPage(pages_);
     mocap_page_ = new MocapPage(pages_);
     output_page_ = new OutputPage(pages_);
-    pages_->addWidget(models_page);
+    pages_->addWidget(models_page_);
     pages_->addWidget(mocap_page_);
     pages_->addWidget(output_page_);
     pages_->addWidget(new SettingsPage(pages_));
@@ -74,11 +77,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(nav_, &QListWidget::currentRowChanged, pages_, &QStackedWidget::setCurrentIndex);
     nav_->setCurrentRow(0);
 
-    connect(models_page, &ModelsPage::model_changed, this,
+    connect(models_page_, &ModelsPage::model_changed, this,
             [this](const QString& name) {
                 model_name_->setText(name);
                 status_model_->setText(QStringLiteral("模型: %1").arg(name));
             });
+
+    // 模型选择 -> 重建渲染器（浮窗与虚拟摄像头合成共用同一实例）
+    connect(models_page_, &ModelsPage::model_activated, this,
+            &MainWindow::on_model_activated);
 
     // 浮窗
     float_window_ = new FloatWindowWidget();
@@ -111,6 +118,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     });
 
     build_tray();
+
+    // 形象渲染器：初始为占位实现（无模型也能出画面）。
+    // 模型页若已恢复上次选择，on_model_activated 会替换为对应模型的渲染器。
+    avatar_renderer_ = create_avatar_renderer(current_model_);
+    if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(avatar_renderer_.get());
+    if (float_window_) float_window_->set_avatar_renderer(avatar_renderer_.get());
+    if (models_page_ && !models_page_->current_model_json().isEmpty()) {
+        on_model_activated(models_page_->current_model_json());
+    }
 
     ui_timer_ = new QTimer(this);
     connect(ui_timer_, &QTimer::timeout, this, &MainWindow::refresh_status);
@@ -314,6 +330,29 @@ void MainWindow::set_vcam_enabled(bool on) {
         registered
             ? QStringLiteral("运行中")
             : QStringLiteral("运行中（未注册：其他软件暂不可见，需一次管理员授权，见 scripts/register_vcam.ps1）"));
+}
+
+void MainWindow::on_model_activated(const QString& model_json) {
+    const Live2dModelInfo info = Live2dModelLibrary::parse(model_json);
+    if (!info.usable()) {
+        status_model_->setText(QStringLiteral("模型不可用: %1")
+                                   .arg(QFileInfo(model_json).fileName()));
+        return;
+    }
+    current_model_ = info;
+
+    std::unique_ptr<AvatarRenderer> fresh = create_avatar_renderer(current_model_);
+    if (!fresh) return;
+
+    // 旧渲染器延迟到下一次替换时回收：管线回调线程可能正在使用它
+    retired_renderer_ = std::move(avatar_renderer_);
+    avatar_renderer_ = std::move(fresh);
+
+    if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(avatar_renderer_.get());
+    if (float_window_) float_window_->set_avatar_renderer(avatar_renderer_.get());
+
+    status_model_->setText(
+        QStringLiteral("模型: %1（%2）").arg(info.name, avatar_renderer_->name()));
 }
 
 void MainWindow::refresh_status() {
