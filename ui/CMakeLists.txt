@@ -121,7 +121,15 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
     if(NOT MSVC)
         target_compile_options(lb_cubism_renderer_test PRIVATE -fpermissive)
     endif()
-    # 模型参数名 dump（确认手臂/手部参数命名）
+    # GL 上下文格式探测（排查 Core/Compatibility Profile 问题）
+option(LB_BUILD_GL_PROBE "Build GL format probe" OFF)
+if(LB_BUILD_GL_PROBE)
+    add_executable(lb_gl_format_probe ${CMAKE_SOURCE_DIR}/tools/gl_format_probe.cpp)
+    target_link_libraries(lb_gl_format_probe PRIVATE Qt6::Gui)
+    target_compile_features(lb_gl_format_probe PRIVATE cxx_std_17)
+endif()
+
+# 模型参数名 dump（确认手臂/手部参数命名）
     add_executable(lb_cubism_params_dump
         ${CMAKE_SOURCE_DIR}/tools/cubism_params_dump.cpp
         src/render/cubism_runtime.cpp

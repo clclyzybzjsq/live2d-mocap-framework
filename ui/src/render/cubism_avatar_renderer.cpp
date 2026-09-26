@@ -262,7 +262,19 @@ bool CubismAvatarRenderer::ensure_gl() {
     }
     {
         const auto* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        std::fprintf(stderr, "[cubism] GL %s\n", ver ? ver : "?");
+        const QSurfaceFormat got = context_->format();
+        std::fprintf(stderr, "[cubism] GL %s (上下文 %d.%d profile=%d)\n", ver ? ver : "?",
+                     got.majorVersion(), got.minorVersion(), static_cast<int>(got.profile()));
+    }
+    // Core Profile 要求必须绑定 VAO 才能发起绘制。Cubism 的 OpenGL ES2 后端
+    // 自身不创建 VAO，在 Core Profile 上下文里会静默失败（GL_INVALID_OPERATION
+    // 且画面空白），这里统一准备一个空 VAO。
+    if (GLEW_VERSION_3_0) {
+        glGenVertexArrays(1, &vao_);
+        if (vao_ != 0) {
+            glBindVertexArray(vao_);
+            std::fprintf(stderr, "[cubism] 已创建 VAO（Core Profile 兼容）\n");
+        }
     }
     glGetError(); // 清掉 glewInit 可能留下的 INVALID_ENUM
     context_->doneCurrent();
@@ -282,6 +294,10 @@ bool CubismAvatarRenderer::build_model(const Live2dModelInfo& model) {
 }
 
 void CubismAvatarRenderer::release_gl() {
+    if (vao_ != 0) {
+        glDeleteVertexArrays(1, &vao_);
+        vao_ = 0;
+    }
     if (runtime_) {
         runtime_->release_textures();
         runtime_->DeleteRenderer();
@@ -328,6 +344,8 @@ void CubismAvatarRenderer::apply_params(const lb::core::SemanticParams& sem) {
 
 void CubismAvatarRenderer::render_frame() {
     fbo_->bind();
+    // Core Profile 下必须绑定 VAO，否则所有绘制调用都是无效操作
+    if (vao_ != 0) glBindVertexArray(vao_);
     glViewport(0, 0, width_, height_);
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);

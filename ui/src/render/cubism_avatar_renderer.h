@@ -60,6 +60,9 @@ private:
     std::unique_ptr<QOpenGLFramebufferObject> fbo_;
     std::unique_ptr<CubismModelRuntime> runtime_;
     std::vector<unsigned int> textures_;
+    // Core Profile 下没有绑定 VAO 就不允许绘制（Cubism 的 ES2 后端不自建 VAO），
+    // 因此这里准备一个空 VAO 供每帧绘制前绑定
+    unsigned int vao_ = 0;
 
     std::string model_dir_;
 

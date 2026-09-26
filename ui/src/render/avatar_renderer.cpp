@@ -2,6 +2,8 @@
 
 #include <QPainter>
 
+#include <cstdio>
+
 #include "avatar_painter.h"
 #ifdef LB_WITH_CUBISM
 #include "cubism_avatar_renderer.h"
@@ -33,10 +35,14 @@ bool cubism_available() {
 }
 
 std::unique_ptr<AvatarRenderer> create_avatar_renderer(const Live2dModelInfo& model) {
+                 cubism_available() ? 1 : 0, model.usable() ? 1 : 0,
+                 model.moc3.toLocal8Bit().constData());
 #ifdef LB_WITH_CUBISM
     if (model.usable()) {
         auto cubism = std::make_unique<CubismAvatarRenderer>();
-        if (cubism->initialize(model)) return cubism;
+        if (cubism->initialize(model)) {
+            return cubism;
+        }
     }
 #else
     (void)model;
