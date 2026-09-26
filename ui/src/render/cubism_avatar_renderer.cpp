@@ -255,6 +255,17 @@ bool CubismAvatarRenderer::initialize_with_current_context(const Live2dModelInfo
         return false;
     }
 
+    // 关键：初始化 GL 函数指针。Cubism 的 OpenGL 后端通过 GLEW 提供全局 GL 函数，
+    // 不初始化它们会在 CreateRenderer 里调用空函数指针直接崩溃（栈顶地址 0x0）。
+    glewExperimental = GL_TRUE;
+    const GLenum err = glewInit();
+    if (err != GLEW_OK) {
+        const auto* msg = reinterpret_cast<const char*>(glewGetErrorString(err));
+        cubism_log("[cubism] glewInit 失败: %s\n", msg ? msg : "?");
+        return false;
+    }
+    glGetError(); // 清掉 glewInit 可能留下的 INVALID_ENUM
+
     if (!build_model(model)) {
         cubism_log("[cubism] 模型加载失败\n");
         return false;
