@@ -286,23 +286,25 @@ void MainWindow::set_vcam_enabled(bool on) {
     }
 
     if (!vcam_) vcam_ = lb::core::create_virtual_camera();
-    if (!vcam_->is_registered() && !vcam_->ensure_registered()) {
-        vcam_enabled_ = false;
-        output_page_->set_vcam_checked(false);
-        if (toggle_vcam_) toggle_vcam_->setChecked(false);
-        output_page_->set_vcam_status(
-            QStringLiteral("需一次管理员权限注册（运行 scripts/register_vcam.ps1）"));
-        return;
-    }
+
+    // 设备注册（首次需要一次管理员授权）。注册失败不阻止写端启动：
+    // 共享内存照常喂帧，只是其他软件暂时枚举不到该设备。
+    bool registered = vcam_->is_registered();
+    if (!registered) registered = vcam_->ensure_registered();
 
     const bool ok = vcam_->start(output_page_->vcam_config());
-    output_page_->set_vcam_status(ok ? QStringLiteral("运行中")
-                                     : QStringLiteral("启动失败"));
     if (!ok) {
         vcam_enabled_ = false;
         output_page_->set_vcam_checked(false);
         if (toggle_vcam_) toggle_vcam_->setChecked(false);
+        output_page_->set_vcam_status(QStringLiteral("启动失败"));
+        return;
     }
+
+    output_page_->set_vcam_status(
+        registered
+            ? QStringLiteral("运行中")
+            : QStringLiteral("运行中（未注册：其他软件暂不可见，需一次管理员授权，见 scripts/register_vcam.ps1）"));
 }
 
 void MainWindow::refresh_status() {
