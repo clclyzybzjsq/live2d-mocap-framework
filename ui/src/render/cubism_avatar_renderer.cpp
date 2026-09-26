@@ -7,18 +7,15 @@
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLFramebufferObjectFormat>
 #include <QOffscreenSurface>
+#include <QImage>
 #include <QPainter>
 #include <QSurfaceFormat>
 
-#include <algorithm>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 
 #include "CubismFramework.hpp"
 #include "CubismModelSettingJson.hpp"
-#include "Effect/CubismBreath.hpp"
-#include "Physics/CubismPhysics.hpp"
 #include "Id/CubismIdManager.hpp"
 #include "Math/CubismMatrix44.hpp"
 #include "Math/CubismModelMatrix.hpp"
@@ -66,27 +63,6 @@ public:
         setting.GetLayoutMap(layout_);
         GetModelMatrix()->SetupFromLayout(layout_);
 
-        // 物理演算：让头发/服饰自然摆动（来自 model3.json 的 Physics 引用）
-        const csmChar* physics_file = setting.GetPhysicsFileName();
-        if (physics_file && physics_file[0] != '\0') {
-            const CubismRuntime::FileBytes ph = CubismRuntime::read_file(dir_ + physics_file);
-            if (ph.ok()) {
-                _physics = CubismPhysics::Create(ph.data.data(),
-                                                 static_cast<csmSizeInt>(ph.data.size()));
-            }
-        }
-
-        // 呼吸：只驱动 ParamBreath。头部参数由动捕实时驱动，
-        // 若呼吸也去改 ParamAngleX/Y/Z 会与动捕打架
-        _breath = CubismBreath::Create();
-        if (_breath) {
-            csmVector<CubismBreath::BreathParameterData> breath_params;
-            breath_params.PushBack(CubismBreath::BreathParameterData(
-                CubismFramework::GetIdManager()->GetId("ParamBreath"), 0.5f, 0.5f, 1.0f, 1.0f));
-            _breath->SetParameters(breath_params);
-        }
-
-        // 以当前姿态为基准存一次参数
         GetModel()->SaveParameters();
         return true;
     }
@@ -138,50 +114,6 @@ public:
 
     Csm::CubismModel* model() { return GetModel(); }
 
-    // 每帧调用：物理、呼吸，以及动捕未活跃时的待机微动。
-    // dt 为距上一帧的秒数；mocap_active 表示动捕当前是否在驱动该模型。
-    void update(float dt, bool mocap_active) {
-        Csm::CubismModel* m = GetModel();
-        if (!m) return;
-        if (_physics) _physics->Evaluate(m, dt);
-        if (_breath) _breath->UpdateParameters(m, dt);
-        if (!mocap_active) apply_idle_motion(dt);
-        m->Update();
-    }
-
-    // 待机微动：模型本身没有物理/呼吸数据（大量解包模型如此）时，
-    // 用程序化的小幅动作让形象不至于像张静止图片：自动眨眼 + 轻微摆动。
-    void apply_idle_motion(float dt) {
-        idle_time_ += dt;
-        Csm::CubismModel* m = GetModel();
-        if (!m) return;
-
-        // 眨眼：约 4 秒一次，单次闭合 ~0.12 秒（用两段相位近似闭-开）
-        constexpr float kBlinkCycle = 4.0f;
-        const float phase = std::fmod(idle_time_, kBlinkCycle);
-        const float eye = (phase < 0.07f || (phase >= 0.13f && phase < 0.19f)) ? 0.06f : 1.0f;
-        set_param_if_exists("ParamEyeLOpen", eye);
-        set_param_if_exists("ParamEyeROpen", eye);
-
-        // 极缓慢的呼吸式起伏与视线漂移（幅度很小，不喧宾夺主）
-        set_param_if_exists("ParamAngleX", std::sin(idle_time_ * 0.55f) * 3.0f);
-        set_param_if_exists("ParamAngleY", std::sin(idle_time_ * 0.43f) * 2.0f);
-        set_param_if_exists("ParamAngleZ", std::sin(idle_time_ * 0.71f) * 2.0f);
-        set_param_if_exists("ParamBodyAngleX", std::sin(idle_time_ * 0.90f) * 1.5f);
-        set_param_if_exists("ParamBreath", 0.5f + 0.5f * std::sin(idle_time_ * 1.4f));
-    }
-
-    void set_param_if_exists(const char* id, float value) {
-        Csm::CubismModel* m = GetModel();
-        if (!m) return;
-        const CubismIdHandle h = CubismFramework::GetIdManager()->GetId(id);
-        const csmInt32 idx = m->GetParameterIndex(h);
-        if (idx >= 0) m->SetParameterValue(idx, value, 1.0f);
-    }
-
-    bool has_physics() const { return _physics != nullptr; }
-    bool has_breath() const { return _breath != nullptr; }
-
     void release_textures() {
         for (unsigned int t : textures_) glDeleteTextures(1, &t);
         textures_.clear();
@@ -208,7 +140,6 @@ private:
     std::string dir_;
     std::vector<unsigned int> textures_;
     csmMap<csmString, csmFloat32> layout_; // 布局信息：每帧据此重建模型矩阵
-    float idle_time_ = 0.0f;               // 待机微动的时间累积
 };
 
 // ---- CubismAvatarRenderer ----
@@ -337,35 +268,26 @@ void CubismAvatarRenderer::render_frame() {
 }
 
 void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
+    { static int n_ = 0; if (n_++ < 4) cubism_log("[tick] ready=%d`n", ready_ ? 1 : 0); }
     if (!ready_) return;
     if (!context_->makeCurrent(surface_.get())) return;
 
-    // 时间步长：驱动呼吸与物理演算
-    const auto now = std::chrono::steady_clock::now();
-    if (tick_started_) {
-        const float dt = std::chrono::duration<float>(now - last_tick_).count();
-        // 夹住异常间隔（例如窗口被挂起），否则物理会跳变
-        dt_seconds_ = std::min(std::max(dt, 0.001f), 0.1f);
-    }
-    last_tick_ = now;
-    tick_started_ = true;
-    time_seconds_ += dt_seconds_;
-
     apply_params(sem);
-    // 有人脸 = 动捕在驱动；无人脸 = 待机，用程序化微动让形象活着
-    runtime_->update(dt_seconds_, sem.face_detected);
+    if (runtime_->model()) runtime_->model()->Update();
     render_frame();
 
     const QImage frame = fbo_->toImage().convertToFormat(QImage::Format_ARGB32);
     {
         std::lock_guard<std::mutex> lock(mutex_);
         front_ = frame;
+        { static int m_ = 0; if (m_++ < 4) { long op = 0; for (int y = 0; y < frame.height(); ++y) { const QRgb* ln = reinterpret_cast<const QRgb*>(frame.constScanLine(y)); for (int x = 0; x < frame.width(); ++x) if (qAlpha(ln[x]) > 8) ++op; } cubism_log("[tick] front=%dx%d 非透明=%ld (%.1f%%)\n", frame.width(), frame.height(), op, 100.0 * op / (double(frame.width()) * frame.height())); } }
     }
     context_->doneCurrent();
 }
 
 void CubismAvatarRenderer::render(QImage& target, const lb::core::SemanticParams&) {
     std::lock_guard<std::mutex> lock(mutex_);
+    { static int k_ = 0; if (k_++ < 4) cubism_log("[render] front_null=%d target=%dx%d`n", front_.isNull() ? 1 : 0, target.width(), target.height()); }
     if (front_.isNull()) return;
     if (front_.size() == target.size()) {
         QPainter p(&target);
