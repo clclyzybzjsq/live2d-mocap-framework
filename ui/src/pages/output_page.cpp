@@ -6,12 +6,19 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QVBoxLayout>
 
 #include "widgets/slider_row.h"
 #include "widgets/toggle_switch.h"
 
 namespace lb::ui {
+
+namespace {
+// 默认取景：上半身（此模型画布偏大，需要较大缩放才能得到上半身特写）
+constexpr double kDefaultViewZoom = 4.5;
+constexpr double kDefaultViewOffsetY = 0.0;
+} // namespace
 
 OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     auto* root = new QVBoxLayout(this);
@@ -99,6 +106,33 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     float_layout->addRow(QString(), hint);
     root->addWidget(float_box);
 
+    // ---- 画面取景：同时作用于浮窗与虚拟摄像头（二者共用渲染器） ----
+    auto* view_box = new QGroupBox(QStringLiteral("画面取景"), this);
+    auto* view_layout = new QFormLayout(view_box);
+    view_layout->setContentsMargins(10, 14, 10, 10);
+    view_layout->setHorizontalSpacing(10);
+    view_layout->setVerticalSpacing(8);
+
+    view_zoom_ = new SliderRow(QStringLiteral("缩放"), 0.5, 9.0, kDefaultViewZoom, view_box);
+    view_layout->addRow(QStringLiteral("取景"), view_zoom_);
+    view_ox_ = new SliderRow(QStringLiteral("水平"), -1.0, 1.0, 0.0, view_box);
+    view_layout->addRow(QStringLiteral("位置"), view_ox_);
+    view_oy_ = new SliderRow(QStringLiteral("垂直"), -1.0, 1.0, kDefaultViewOffsetY, view_box);
+    view_layout->addRow(QString(), view_oy_);
+
+    auto* view_hint = new QLabel(
+        QStringLiteral("默认取上半身；放大可做特写，配合位置可自由裁剪取景范围"), view_box);
+    view_hint->setObjectName("HintText");
+    view_layout->addRow(QString(), view_hint);
+
+    const auto emit_view = [this]() {
+        emit view_changed(view_zoom_->value(), view_ox_->value(), view_oy_->value());
+    };
+    connect(view_zoom_, &SliderRow::value_changed, this, [emit_view](double) { emit_view(); });
+    connect(view_ox_, &SliderRow::value_changed, this, [emit_view](double) { emit_view(); });
+    connect(view_oy_, &SliderRow::value_changed, this, [emit_view](double) { emit_view(); });
+    root->addWidget(view_box);
+
     root->addStretch(1);
 }
 
@@ -121,6 +155,25 @@ void OutputPage::set_vcam_checked(bool on) {
 
 void OutputPage::set_float_checked(bool on) {
     if (float_switch_) float_switch_->setChecked(on);
+}
+
+double OutputPage::view_zoom() const { return view_zoom_ ? view_zoom_->value() : kDefaultViewZoom; }
+
+double OutputPage::view_offset_x() const { return view_ox_ ? view_ox_->value() : 0.0; }
+
+double OutputPage::view_offset_y() const {
+    return view_oy_ ? view_oy_->value() : kDefaultViewOffsetY;
+}
+
+void OutputPage::set_view(double zoom, double offset_x, double offset_y) {
+    if (view_zoom_) {
+        const QSignalBlocker b1(view_zoom_);
+        const QSignalBlocker b2(view_ox_);
+        const QSignalBlocker b3(view_oy_);
+        view_zoom_->set_value(zoom);
+        view_ox_->set_value(offset_x);
+        view_oy_->set_value(offset_y);
+    }
 }
 
 void OutputPage::set_vcam_status(const QString& text) {

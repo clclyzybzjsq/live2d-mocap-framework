@@ -9,6 +9,7 @@ class QLabel;
 
 namespace lb::ui {
 
+class SliderRow;
 class ToggleSwitch;
 
 // 输出页：两个通道分区（方案 3.3 / 3.4 / 4.0）。
@@ -22,6 +23,11 @@ public:
     lb::core::VirtualCameraFormat vcam_config() const;
     // 画面内容：默认输出 Live2D 形象 + 虚化背景；该开关打开时只输出背景（无 Live2D）
     bool vcam_background_only() const;
+    // 画面取景（同时作用于浮窗与虚拟摄像头，二者共用同一渲染器）
+    double view_zoom() const;
+    double view_offset_x() const;
+    double view_offset_y() const;
+    void set_view(double zoom, double offset_x, double offset_y);
     void set_vcam_checked(bool on);
     void set_float_checked(bool on);
     void set_vcam_status(const QString& text);
@@ -33,6 +39,7 @@ signals:
     void floating_window_opacity(double opacity);
     void virtual_camera_toggled(bool on);
     void vcam_background_only_toggled(bool on);
+    void view_changed(double zoom, double offset_x, double offset_y);
 
 private:
     QComboBox* vcam_resolution_ = nullptr;
@@ -40,6 +47,9 @@ private:
     ToggleSwitch* vcam_switch_ = nullptr;
     ToggleSwitch* vcam_bg_only_ = nullptr;
     ToggleSwitch* float_switch_ = nullptr;
+    SliderRow* view_zoom_ = nullptr;
+    SliderRow* view_ox_ = nullptr;
+    SliderRow* view_oy_ = nullptr;
     QLabel* vcam_status_ = nullptr;
 };
 

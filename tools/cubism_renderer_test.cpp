@@ -85,6 +85,7 @@ int main(int argc, char** argv) {
         if (args.size() >= 5) cubism->set_offset(0.0f, args.at(4).toFloat());
     }
 
+
     // 语义参数：带明显头部转动与眨眼，便于观察
     lb::core::SemanticParams sem;
     sem.head.yaw = 12.0f;

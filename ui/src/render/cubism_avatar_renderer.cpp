@@ -107,13 +107,10 @@ public:
 
         Rendering::CubismOffscreenManager_OpenGLES2::GetInstance()->BeginFrameProcess();
 
-        // 每帧从布局重建模型矩阵：SetWidth/Translate 都是把变换乘到当前矩阵上，
-        // 若直接连续调用，偏移会逐帧累加导致模型迅速移出画面
+        // 每帧从布局重建模型矩阵：SetWidth 是把变换乘到当前矩阵上，
+        // 若直接连续调用会逐帧累加导致模型迅速移出画面
         GetModelMatrix()->SetupFromLayout(layout_);
         GetModelMatrix()->SetWidth(2.0f * zoom);
-        if (offset_x != 0.0f || offset_y != 0.0f) {
-            GetModelMatrix()->Translate(offset_x, offset_y);
-        }
 
         CubismMatrix44 projection;
         projection.LoadIdentity();
@@ -126,6 +123,11 @@ public:
             projection.Scale(1.0f, view_aspect / canvas_aspect);
         } else {
             projection.Scale(canvas_aspect / view_aspect, 1.0f);
+        }
+        // 取景平移放在投影空间：±1 约等于整幅画面宽度/高度的位移，
+        // 与 UI 滑块语义一致（放在模型矩阵里会被 SetWidth 缩放吞掉）
+        if (offset_x != 0.0f || offset_y != 0.0f) {
+            projection.Translate(offset_x * 2.0f, offset_y * 2.0f);
         }
         projection.MultiplyByMatrix(GetModelMatrix());
 
@@ -389,6 +391,12 @@ void CubismAvatarRenderer::set_render_size(int w, int h) {
         width_ = w;
         height_ = h;
     }
+}
+
+void CubismAvatarRenderer::set_view(float zoom, float offset_x, float offset_y) {
+    zoom_ = zoom;
+    offset_x_ = offset_x;
+    offset_y_ = offset_y;
 }
 
 void CubismAvatarRenderer::set_zoom(float z) { zoom_ = z; }

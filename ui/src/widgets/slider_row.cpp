@@ -60,4 +60,8 @@ double SliderRow::value() const {
     return slider_->value() / static_cast<double>(kPrecision);
 }
 
+void SliderRow::set_value(double v) {
+    slider_->setValue(static_cast<int>(v * kPrecision));
+}
+
 } // namespace lb::ui

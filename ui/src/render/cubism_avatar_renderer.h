@@ -43,6 +43,7 @@ public:
     // 渲染分辨率（合成画布通常为相机尺寸 640x480）
     void set_render_size(int w, int h);
     // 模型显示缩放（1.0 为默认适配；越大模型越大）
+    void set_view(float zoom, float offset_x, float offset_y);
     void set_zoom(float z);
     // 模型显示位置偏移（归一化，0 为中心）
     void set_offset(float x, float y);

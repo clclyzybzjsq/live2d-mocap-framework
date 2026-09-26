@@ -10,6 +10,7 @@
 #include <QMetaObject>
 #include <QPainter>
 #include <QPushButton>
+#include <QSettings>
 #include <QStackedWidget>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -120,9 +121,30 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
     build_tray();
 
+    // 画面取景：恢复上次设置（默认上半身），并在变化时应用到渲染器
+    {
+        QSettings settings;
+        const double z = settings.value(QStringLiteral("view/zoom"), output_page_->view_zoom()).toDouble();
+        const double ox = settings.value(QStringLiteral("view/offset_x"), output_page_->view_offset_x()).toDouble();
+        const double oy = settings.value(QStringLiteral("view/offset_y"), output_page_->view_offset_y()).toDouble();
+        output_page_->set_view(z, ox, oy);
+    }
+    connect(output_page_, &OutputPage::view_changed, this,
+            [this](double zoom, double offset_x, double offset_y) {
+                if (avatar_renderer_) avatar_renderer_->set_view(zoom, offset_x, offset_y);
+                QSettings settings;
+                settings.setValue(QStringLiteral("view/zoom"), zoom);
+                settings.setValue(QStringLiteral("view/offset_x"), offset_x);
+                settings.setValue(QStringLiteral("view/offset_y"), offset_y);
+            });
+
     // 形象渲染器：初始为占位实现（无模型也能出画面）。
     // 模型页若已恢复上次选择，on_model_activated 会替换为对应模型的渲染器。
     avatar_renderer_ = create_avatar_renderer(current_model_);
+    if (avatar_renderer_) {
+        avatar_renderer_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
+                                  output_page_->view_offset_y());
+    }
     if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(avatar_renderer_.get());
     if (float_window_) float_window_->set_avatar_renderer(avatar_renderer_.get());
     if (models_page_ && !models_page_->current_model_json().isEmpty()) {
@@ -379,6 +401,10 @@ void MainWindow::on_model_activated(const QString& model_json) {
     retired_renderer_ = std::move(avatar_renderer_);
     avatar_renderer_ = std::move(fresh);
 
+    if (avatar_renderer_ && output_page_) {
+        avatar_renderer_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
+                                  output_page_->view_offset_y());
+    }
     if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(avatar_renderer_.get());
     if (float_window_) float_window_->set_avatar_renderer(avatar_renderer_.get());
 

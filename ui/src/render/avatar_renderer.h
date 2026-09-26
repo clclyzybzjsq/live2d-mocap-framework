@@ -24,6 +24,14 @@ public:
     // 绑定模型（占位实现忽略模型信息，总能成功）
     virtual bool initialize(const Live2dModelInfo& model) = 0;
 
+    // 取景：zoom 为画面放大倍数，offset 为模型在画面中的平移（归一化单位）。
+    // 用于实现「上半身特写 / 自由缩放切割」等取景需求。
+    virtual void set_view(float zoom, float offset_x, float offset_y) {
+        (void)zoom;
+        (void)offset_x;
+        (void)offset_y;
+    }
+
     // UI 线程调用：需要 GL 上下文等线程绑定资源的渲染器在此真正渲染一帧；
     // 占位渲染器不需要，默认空实现。
     virtual void tick(const lb::core::SemanticParams& sem) { (void)sem; }

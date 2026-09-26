@@ -15,6 +15,7 @@ public:
               QWidget* parent = nullptr);
 
     double value() const;
+    void set_value(double v);
 
 signals:
     void value_changed(double value);

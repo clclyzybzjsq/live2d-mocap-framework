@@ -121,6 +121,26 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
     if(NOT MSVC)
         target_compile_options(lb_cubism_renderer_test PRIVATE -fpermissive)
     endif()
+    # 模型参数名 dump（确认手臂/手部参数命名）
+    add_executable(lb_cubism_params_dump
+        ${CMAKE_SOURCE_DIR}/tools/cubism_params_dump.cpp
+        src/render/cubism_runtime.cpp
+    )
+    target_compile_definitions(lb_cubism_params_dump PRIVATE LB_WITH_CUBISM)
+    target_include_directories(lb_cubism_params_dump PRIVATE
+        src
+        "${LB_CUBISM_SDK_DIR}/Core/include"
+        "${LB_CUBISM_SDK_DIR}/Framework/src")
+    target_link_libraries(lb_cubism_params_dump PRIVATE
+        Qt6::Gui Qt6::OpenGL Framework "${LB_CUBISM_CORE_IMPLIB}" lb_core)
+    target_compile_features(lb_cubism_params_dump PRIVATE cxx_std_17)
+    if(NOT MSVC)
+        target_compile_options(lb_cubism_params_dump PRIVATE -fpermissive)
+    endif()
+    add_custom_command(TARGET lb_cubism_params_dump POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LB_CUBISM_CORE_DLL}" "$<TARGET_FILE_DIR:lb_cubism_params_dump>/Live2DCubismCore.dll")
+
     add_custom_command(TARGET lb_cubism_renderer_test POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "${LB_CUBISM_CORE_DLL}" "$<TARGET_FILE_DIR:lb_cubism_renderer_test>/Live2DCubismCore.dll"
