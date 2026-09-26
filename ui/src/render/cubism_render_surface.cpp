@@ -1,16 +1,17 @@
 #include "cubism_render_surface.h"
 
 #include "cubism_avatar_renderer.h"
+#include "cubism_runtime.h" // cubism_log
 
 namespace lb::ui {
 
 CubismRenderSurface::CubismRenderSurface(QWidget* parent) : QOpenGLWidget(parent) {
+    cubism_log("[surface] 构造\n");
     // 这个 widget 不用于显示，只为拿到一个"在 Qt Widgets 应用里可用"的 GL 上下文。
-    // 移到屏幕外并保持极小的尺寸，避免干扰用户界面。
-    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
-    setAttribute(Qt::WA_TranslucentBackground);
-    resize(1, 1);
-    move(-10000, -10000);
+    // WA_DontShowOnScreen 是 Qt 为这类场景提供的属性：widget 会被"显示"（因此
+    // GL 上下文正常初始化）但不绘制到屏幕上，也不影响窗口布局。
+    setAttribute(Qt::WA_DontShowOnScreen, true);
+    resize(640, 480);
 }
 
 CubismRenderSurface::~CubismRenderSurface() {
@@ -56,6 +57,7 @@ QImage CubismRenderSurface::frame() const {
 bool CubismRenderSurface::ready() const { return renderer_ && renderer_->model_bound(); }
 
 void CubismRenderSurface::initializeGL() {
+    cubism_log("[surface] initializeGL 进入\n");
     makeCurrent();
     renderer_ = std::make_unique<CubismAvatarRenderer>();
 
@@ -67,6 +69,7 @@ void CubismRenderSurface::initializeGL() {
         ok = has_pending_model_ && renderer_->initialize_with_current_context(model);
     }
     doneCurrent();
+    cubism_log("[surface] initializeGL 退出 ok=%d\n", ok ? 1 : 0);
     emit initialized(ok);
 }
 

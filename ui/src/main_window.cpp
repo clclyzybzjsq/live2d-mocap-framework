@@ -143,23 +143,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // 形象渲染：用一个移到屏幕外的 QOpenGLWidget 作为渲染宿主。
     // Qt Widgets 应用里自建的离屏 GL 上下文渲染不出内容（全透明），
     // 而 QOpenGLWidget 提供的上下文可以正常工作。
-    render_surface_ = new CubismRenderSurface(this);
-    connect(render_surface_, &CubismRenderSurface::initialized, this, [this](bool ok) {
-        // 渲染器实例由 render_surface_ 持有；这里只把裸指针交给消费者
-        if (CubismAvatarRenderer* r = render_surface_->renderer()) {
-            if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(r);
-            if (float_window_) float_window_->set_avatar_renderer(r);
-            render_surface_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
-                                      output_page_->view_offset_y());
+    // 注意：延迟到主窗口显示之后再创建 —— 渲染初始化涉及模型加载与 Cubism
+    // 启动，耗时可能明显，放在构造函数里会让窗口迟迟不出现。
+    QTimer::singleShot(0, this, [this]() {
+        render_surface_ = new CubismRenderSurface(this);
+        connect(render_surface_, &CubismRenderSurface::initialized, this, [this](bool ok) {
+            if (CubismAvatarRenderer* r = render_surface_->renderer()) {
+                if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(r);
+                if (float_window_) float_window_->set_avatar_renderer(r);
+                render_surface_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
+                                          output_page_->view_offset_y());
+            }
+            status_model_->setText(
+                ok ? QStringLiteral("模型: %1（Cubism）").arg(current_model_.name)
+                   : QStringLiteral("模型: %1（渲染器初始化失败）").arg(current_model_.name));
+        });
+        render_surface_->show();
+        if (models_page_ && !models_page_->current_model_json().isEmpty()) {
+            on_model_activated(models_page_->current_model_json());
         }
-        status_model_->setText(ok ? QStringLiteral("模型: %1（Cubism）").arg(current_model_.name)
-                                  : QStringLiteral("模型: %1（渲染器初始化失败）")
-                                        .arg(current_model_.name));
     });
-    render_surface_->show(); // 屏幕外（构造时已 move 到 (-10000,-10000)）
-    if (models_page_ && !models_page_->current_model_json().isEmpty()) {
-        on_model_activated(models_page_->current_model_json());
-    }
 
     ui_timer_ = new QTimer(this);
     connect(ui_timer_, &QTimer::timeout, this, &MainWindow::refresh_status);

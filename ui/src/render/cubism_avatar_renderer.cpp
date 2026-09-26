@@ -218,13 +218,17 @@ bool CubismAvatarRenderer::ensure_gl() {
 }
 
 bool CubismAvatarRenderer::build_model(const Live2dModelInfo& model) {
+    cubism_log("[cubism] build_model: acquire\n");
     if (!CubismRuntime::acquire()) return false;
+    cubism_log("[cubism] build_model: 构造 runtime\n");
     runtime_ = std::make_unique<CubismModelRuntime>();
+    cubism_log("[cubism] build_model: 载入模型\n");
     if (!runtime_->load(model.model_json.toLocal8Bit().toStdString(), width_, height_)) {
         runtime_.reset();
         CubismRuntime::release();
         return false;
     }
+    cubism_log("[cubism] build_model: 完成\n");
     return true;
 }
 

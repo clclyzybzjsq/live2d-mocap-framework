@@ -122,7 +122,9 @@ bool CubismRuntime::acquire() {
         const csmBool ok = CubismFramework::StartUp(&g_allocator, &g_option);
         cubism_log("[runtime] StartUp 返回 %d\n", ok ? 1 : 0);
         if (!ok) return false;
+        cubism_log("[runtime] 调用 Initialize()\n");
         CubismFramework::Initialize();
+        cubism_log("[runtime] Initialize() 完成\n");
     }
     ++g_refs;
     return true;
