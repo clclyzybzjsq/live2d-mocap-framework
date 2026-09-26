@@ -33,6 +33,20 @@ add_executable(lb_ui
 target_include_directories(lb_ui PRIVATE src)
 target_link_libraries(lb_ui PRIVATE Qt6::Widgets lb_core lb_win)
 
+# Live2D Cubism：Framework（官方 CMake 已 add_subdirectory）+ Core 导入库
+if(LB_WITH_CUBISM)
+    target_compile_definitions(lb_ui PRIVATE LB_WITH_CUBISM)
+    target_include_directories(lb_ui PRIVATE
+        "${LB_CUBISM_SDK_DIR}/Core/include"
+        "${LB_CUBISM_SDK_DIR}/Framework/src")
+    target_link_libraries(lb_ui PRIVATE Framework "${LB_CUBISM_CORE_IMPLIB}")
+    # 运行时需要官方 Core dll 与 exe 同目录
+    add_custom_command(TARGET lb_ui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LB_CUBISM_CORE_DLL}" "$<TARGET_FILE_DIR:lb_ui>/Live2DCubismCore.dll"
+        COMMENT "Copying Live2DCubismCore.dll next to lb_ui.exe")
+endif()
+
 # 合成器离屏验证（不需 UI/相机/设备）：背景虚化 + Live2D 叠加 + 两种内容模式
 option(LB_BUILD_VCAM_COMPOSE_TEST "Build vcam compositor offscreen test" OFF)
 if(LB_BUILD_VCAM_COMPOSE_TEST)
