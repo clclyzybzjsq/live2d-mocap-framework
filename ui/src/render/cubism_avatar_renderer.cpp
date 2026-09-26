@@ -10,6 +10,7 @@
 #include <QPainter>
 #include <QSurfaceFormat>
 
+#include <cstdio>
 #include <cstring>
 
 #include "CubismFramework.hpp"
@@ -58,9 +59,8 @@ public:
         }
         GetRenderer<Rendering::CubismRenderer_OpenGLES2>()->IsPremultipliedAlpha(false);
 
-        csmMap<csmString, csmFloat32> layout;
-        setting.GetLayoutMap(layout);
-        GetModelMatrix()->SetupFromLayout(layout);
+        setting.GetLayoutMap(layout_);
+        GetModelMatrix()->SetupFromLayout(layout_);
 
         GetModel()->SaveParameters();
         return true;
@@ -82,7 +82,9 @@ public:
 
         Rendering::CubismOffscreenManager_OpenGLES2::GetInstance()->BeginFrameProcess();
 
-        // 模型矩阵：SetWidth 控制模型在投影空间中的宽度（越大越占画面）
+        // 每帧从布局重建模型矩阵：SetWidth/Translate 都是把变换乘到当前矩阵上，
+        // 若直接连续调用，偏移会逐帧累加导致模型迅速移出画面
+        GetModelMatrix()->SetupFromLayout(layout_);
         GetModelMatrix()->SetWidth(2.0f * zoom);
         if (offset_x != 0.0f || offset_y != 0.0f) {
             GetModelMatrix()->Translate(offset_x, offset_y);
@@ -136,6 +138,7 @@ private:
 
     std::string dir_;
     std::vector<unsigned int> textures_;
+    csmMap<csmString, csmFloat32> layout_; // 布局信息：每帧据此重建模型矩阵
 };
 
 // ---- CubismAvatarRenderer ----
@@ -187,7 +190,7 @@ bool CubismAvatarRenderer::ensure_gl() {
     }
     {
         const auto* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        std::fprintf(stderr, "[cubism] GL 就绪: %s\n", ver ? ver : "?");
+        std::fprintf(stderr, "[cubism] GL %s\n", ver ? ver : "?");
     }
     glGetError(); // 清掉 glewInit 可能留下的 INVALID_ENUM
     context_->doneCurrent();

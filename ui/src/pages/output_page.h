@@ -23,6 +23,7 @@ public:
     // 画面内容：默认输出 Live2D 形象 + 虚化背景；该开关打开时只输出背景（无 Live2D）
     bool vcam_background_only() const;
     void set_vcam_checked(bool on);
+    void set_float_checked(bool on);
     void set_vcam_status(const QString& text);
 
 signals:
@@ -38,6 +39,7 @@ private:
     QComboBox* vcam_fps_ = nullptr;
     ToggleSwitch* vcam_switch_ = nullptr;
     ToggleSwitch* vcam_bg_only_ = nullptr;
+    ToggleSwitch* float_switch_ = nullptr;
     QLabel* vcam_status_ = nullptr;
 };
 

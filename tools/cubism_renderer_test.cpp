@@ -96,6 +96,12 @@ int main(int argc, char** argv) {
     sem.mouth.smile = 0.5f;
     sem.body.torso_sway = 3.0f;
 
+    // 可选参数：zero 表示使用全零语义参数（复现 UI 未启动动捕的情形）
+    if (args.size() >= 6 && args.at(5) == QStringLiteral("zero")) {
+        sem = lb::core::SemanticParams{};
+        printf("  （使用全零语义参数）\n");
+    }
+
     // 模拟：UI 线程 tick 渲染若干帧
     const int kWarm = 3;
     for (int i = 0; i < kWarm; ++i) renderer->tick(sem);

@@ -73,10 +73,10 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     float_layout->setHorizontalSpacing(10);
     float_layout->setVerticalSpacing(8);
 
-    auto* show_switch = new ToggleSwitch(float_box);
-    connect(show_switch, &ToggleSwitch::clicked, this,
+    float_switch_ = new ToggleSwitch(float_box);
+    connect(float_switch_, &ToggleSwitch::clicked, this,
             &OutputPage::floating_window_toggled);
-    float_layout->addRow(QStringLiteral("显示"), show_switch);
+    float_layout->addRow(QStringLiteral("显示"), float_switch_);
 
     auto* through_switch = new ToggleSwitch(float_box);
     connect(through_switch, &ToggleSwitch::clicked, this,
@@ -117,6 +117,10 @@ bool OutputPage::vcam_background_only() const {
 
 void OutputPage::set_vcam_checked(bool on) {
     vcam_switch_->setChecked(on);
+}
+
+void OutputPage::set_float_checked(bool on) {
+    if (float_switch_) float_switch_->setChecked(on);
 }
 
 void OutputPage::set_vcam_status(const QString& text) {

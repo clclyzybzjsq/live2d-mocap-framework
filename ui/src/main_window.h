@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <mutex>
+#include <vector>
 
 class QLabel;
 class QAction;
@@ -40,6 +41,9 @@ public:
 public slots:
     void set_running(bool running);
     void set_vcam_enabled(bool on);
+
+    // 启动参数：自动开启虚拟摄像头/浮窗、指定模型
+    void apply_startup_options(bool auto_vcam, bool show_float, const QString& model_path);
 
 signals:
     void running_changed(bool running);
@@ -95,6 +99,12 @@ private:
     QTimer* avatar_timer_ = nullptr;
     std::mutex semantic_mutex_;
     lb::core::SemanticParams last_semantic_;
+    // 最近相机帧缓存（BGRA 紧凑拷贝）：动捕未启动时虚拟摄像头仍可输出待机形象
+    std::mutex camera_mutex_;
+    std::vector<uint8_t> camera_buf_;
+    int camera_w_ = 0;
+    int camera_h_ = 0;
+    bool camera_valid_ = false;
     FloatWindowWidget* float_window_ = nullptr;
     QTimer* ui_timer_ = nullptr;
     bool running_ = false;

@@ -1,5 +1,6 @@
 #include "vcam_compositor.h"
 
+#include <QLinearGradient>
 #include <QPainter>
 
 #include <algorithm>
@@ -30,19 +31,33 @@ const DimTable kDim;
 
 const lb::core::FrameView* VcamCompositor::compose(const lb::core::FrameView& camera,
                                                    const lb::core::SemanticParams& sem) {
-    if (camera.empty() || camera.format != lb::core::PixelFormat::BGRA32) return nullptr;
-    const int w = camera.width;
-    const int h = camera.height;
+    const bool has_camera = !camera.empty() &&
+                            camera.format == lb::core::PixelFormat::BGRA32;
+    const int w = has_camera ? camera.width : width_;
+    const int h = has_camera ? camera.height : height_;
+    if (w <= 0 || h <= 0) return nullptr;
 
-    // 输入帧直接包成 QImage（只读、不拷贝）。小端下 ARGB32 的内存布局即 BGRA。
-    const QImage src(static_cast<const uchar*>(camera.plane0), w, h,
-                     static_cast<int>(camera.stride0), QImage::Format_ARGB32);
+    if (has_camera) {
+        // 输入帧直接包成 QImage（只读、不拷贝）。小端下 ARGB32 的内存布局即 BGRA。
+        const QImage src(static_cast<const uchar*>(camera.plane0), w, h,
+                         static_cast<int>(camera.stride0), QImage::Format_ARGB32);
 
-    // 背景：降采样到 1/kBlurDownscale 再用双线性放大回来，得到廉价的大半径模糊
-    const int dw = std::max(1, w / kBlurDownscale);
-    const int dh = std::max(1, h / kBlurDownscale);
-    const QImage small = src.scaled(dw, dh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-    canvas_ = small.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        // 背景：降采样到 1/kBlurDownscale 再用双线性放大回来，得到廉价的大半径模糊
+        const int dw = std::max(1, w / kBlurDownscale);
+        const int dh = std::max(1, h / kBlurDownscale);
+        const QImage small = src.scaled(dw, dh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        canvas_ = small.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        last_camera_ = camera;
+    } else {
+        // 没有相机帧（动捕未启动/无摄像头）时用固定深色渐变兜底，
+        // 这样一打开虚拟摄像头就能在 OBS 等软件里看到形象
+        if (canvas_.size() != QSize(w, h)) canvas_ = QImage(w, h, QImage::Format_ARGB32);
+        QLinearGradient grad(0, 0, 0, h);
+        grad.setColorAt(0.0, QColor(24, 28, 36));
+        grad.setColorAt(1.0, QColor(12, 14, 18));
+        QPainter g(&canvas_);
+        g.fillRect(0, 0, w, h, grad);
+    }
 
     // 背景压暗：人物（灰调形象）与虚化背景亮度接近时几乎看不出轮廓，
     // 压暗背景是虚拟主播画面的常规做法

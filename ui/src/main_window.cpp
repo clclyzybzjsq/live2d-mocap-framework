@@ -1,6 +1,7 @@
 #include "main_window.h"
 
 #include <QApplication>
+#include <cstring>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -132,8 +133,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(ui_timer_, &QTimer::timeout, this, &MainWindow::refresh_status);
     ui_timer_->start(250);
 
-    // 形象渲染节拍：Cubism 渲染必须在持有 GL 上下文的 UI 线程进行，
-    // 管线线程只通过 render() 读取最近一帧结果。
+    // 形象渲染与虚拟摄像头输出节拍。
+    // Cubism 渲染必须在持有 GL 上下文的 UI 线程进行；虚拟摄像头推帧也统一由
+    // 这里驱动，这样动捕未启动时（无相机帧）虚拟摄像头依然输出待机形象。
     avatar_timer_ = new QTimer(this);
     connect(avatar_timer_, &QTimer::timeout, this, [this]() {
         if (!avatar_renderer_) return;
@@ -143,6 +145,21 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             sem = last_semantic_;
         }
         avatar_renderer_->tick(sem);
+
+        if (!vcam_ || !vcam_->is_running() || !vcam_compositor_) return;
+        lb::core::FrameView cam;
+        {
+            std::lock_guard<std::mutex> lock(camera_mutex_);
+            if (camera_valid_ && !camera_buf_.empty()) {
+                cam.plane0 = camera_buf_.data();
+                cam.stride0 = static_cast<uint32_t>(camera_w_) * 4u;
+                cam.width = camera_w_;
+                cam.height = camera_h_;
+                cam.format = lb::core::PixelFormat::BGRA32;
+            }
+        }
+        const lb::core::FrameView* out = vcam_compositor_->compose(cam, sem);
+        if (out) vcam_->push_frame(*out);
     });
     avatar_timer_->start(33); // 约 30fps
 }
@@ -369,6 +386,19 @@ void MainWindow::on_model_activated(const QString& model_json) {
         QStringLiteral("模型: %1（%2）").arg(info.name, avatar_renderer_->name()));
 }
 
+void MainWindow::apply_startup_options(bool auto_vcam, bool show_float,
+                                       const QString& model_path) {
+    if (!model_path.isEmpty()) on_model_activated(model_path);
+
+    if (show_float && float_window_) {
+        float_window_->show();
+        float_window_->raise();
+        if (output_page_) output_page_->set_float_checked(true);
+    }
+
+    if (auto_vcam) set_vcam_enabled(true);
+}
+
 void MainWindow::refresh_status() {
     if (!running_ || !pipeline_) return;
     const lb::core::PipelineStats stats = pipeline_->stats();
@@ -391,14 +421,21 @@ void MainWindow::on_pipeline_frame(const lb::core::FrameView& frame,
         std::lock_guard<std::mutex> lock(semantic_mutex_);
         last_semantic_ = semantic;
     }
-    // 虚拟摄像头喂帧：管线回调线程直推（vcam 内部有锁）。
-    // 输出内容不是相机原始帧，而是合成画面：默认 Live2D 形象 + 虚化背景
-    // （"仅输出背景"开启时只输出背景，不含 Live2D）。
-    if (vcam_ && vcam_->is_running()) {
-        const lb::core::FrameView* out = nullptr;
-        if (vcam_compositor_) out = vcam_compositor_->compose(frame, semantic);
-        // 合成失败（格式未知等）时回退为原始帧，保证设备始终有画面
-        vcam_->push_frame(out ? *out : frame);
+    // 缓存相机帧（BGRA 紧凑拷贝）。虚拟摄像头不在这里推帧：
+    // 推帧统一由 UI 定时器驱动，动捕停止后仍能继续输出待机形象。
+    if (frame.format == lb::core::PixelFormat::BGRA32 && frame.width > 0 && frame.height > 0 &&
+        frame.plane0 != nullptr) {
+        const size_t pitch = static_cast<size_t>(frame.width) * 4u;
+        const auto* src = static_cast<const uint8_t*>(frame.plane0);
+        std::lock_guard<std::mutex> lock(camera_mutex_);
+        camera_buf_.resize(pitch * static_cast<size_t>(frame.height));
+        for (int y = 0; y < frame.height; ++y) {
+            std::memcpy(camera_buf_.data() + pitch * static_cast<size_t>(y),
+                        src + static_cast<size_t>(frame.stride0) * static_cast<size_t>(y), pitch);
+        }
+        camera_w_ = frame.width;
+        camera_h_ = frame.height;
+        camera_valid_ = true;
     }
 
     FrameSnapshot snap;

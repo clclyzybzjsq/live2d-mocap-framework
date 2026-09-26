@@ -32,13 +32,23 @@ public:
     void set_avatar_renderer(AvatarRenderer* r) { renderer_.store(r); }
     AvatarRenderer* avatar_renderer() const { return renderer_.load(); }
 
-    // camera 须为 BGRA32 格式；无法合成时返回 nullptr。
+    // camera 须为 BGRA32 或为空（空表示当前没有相机帧，用兜底背景）。
+    // 无法合成时返回 nullptr。
     const lb::core::FrameView* compose(const lb::core::FrameView& camera,
                                        const lb::core::SemanticParams& sem);
+
+    // 渲染画布尺寸（无相机帧时使用）
+    void set_canvas_size(int w, int h) {
+        width_ = w;
+        height_ = h;
+    }
 
 private:
     VcamContent content_ = VcamContent::Live2dOverBlurredBackground;
     std::atomic<AvatarRenderer*> renderer_{nullptr};
+    int width_ = 640;
+    int height_ = 480;
+    lb::core::FrameView last_camera_; // 最近一次有相机帧时的视图信息（仅作记录）
     QImage canvas_;
     std::vector<uint8_t> buffer_;
     lb::core::FrameView view_;
