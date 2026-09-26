@@ -38,6 +38,11 @@ if(LB_BUILD_VCAM_PROBE)
     add_executable(lb_vcam_probe tools/vcam_probe.cpp)
     target_link_libraries(lb_vcam_probe PRIVATE strmiids ole32 oleaut32 uuid)
     target_compile_features(lb_vcam_probe PRIVATE cxx_std_17)
+
+    # 只读检查虚拟摄像头共享内存状态（是否在推帧、画面采样）
+    add_executable(lb_vcam_inspect tools/vcam_inspect.cpp)
+    target_link_libraries(lb_vcam_inspect PRIVATE lb_core)
+    target_compile_features(lb_vcam_inspect PRIVATE cxx_std_17)
 endif()
 if(LB_BUILD_VCAM_FLOW)
     add_executable(lb_vcam_flow tools/vcam_flow_test.cpp)
