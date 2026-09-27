@@ -31,6 +31,9 @@ public:
     virtual bool is_running() const = 0;
 
     virtual CaptureConfig config() const = 0;
+    // 运行中切换水平镜像（采集端翻转，位于推理之前，因此转头方向也会一起镜像）。
+    // 默认空实现，便于不支持的平台忽略。
+    virtual void set_mirror(bool /*enabled*/) {}
 };
 
 } // namespace lb::core

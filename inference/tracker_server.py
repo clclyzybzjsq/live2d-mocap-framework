@@ -28,6 +28,34 @@ from protocol import (FRAME_OFFSET, HEADER_SIZE, MAGIC, RESULT_OFFSET,
 
 POLL_SLEEP_S = 0.002
 
+# ARKit 52 路表情系数的规范顺序，与 core/src/solve.cpp 里的 kBlend* 索引常量
+# 一一对应。必须按名字取值再排成这个顺序：MediaPipe 的 category 顺序目前虽然
+# 与之接近，但一旦错位，索引就会指到别的表情上（例如"张嘴"实际读到了
+# "睁大眼睛"），表现为只有一只眼睛跟得上、嘴不动之类的怪现象。
+ARKIT_ORDER = (
+    "browDownLeft", "browDownRight", "browInnerUp", "browOuterUpLeft", "browOuterUpRight",
+    "cheekPuff", "cheekSquintLeft", "cheekSquintRight",
+    "eyeBlinkLeft", "eyeBlinkRight", "eyeLookDownLeft", "eyeLookDownRight",
+    "eyeLookInLeft", "eyeLookInRight", "eyeLookOutLeft", "eyeLookOutRight",
+    "eyeLookUpLeft", "eyeLookUpRight", "eyeSquintLeft", "eyeSquintRight",
+    "eyeWideLeft", "eyeWideRight",
+    "jawForward", "jawLeft", "jawRight", "jawOpen",
+    "mouthClose", "mouthDimpleLeft", "mouthDimpleRight", "mouthFrownLeft", "mouthFrownRight",
+    "mouthFunnel", "mouthLeft", "mouthLowerDownLeft", "mouthLowerDownRight",
+    "mouthPressLeft", "mouthPressRight", "mouthPucker", "mouthRight",
+    "mouthRollLower", "mouthRollUpper", "mouthShrugLower", "mouthShrugUpper",
+    "mouthSmileLeft", "mouthSmileRight", "mouthStretchLeft", "mouthStretchRight",
+    "mouthUpperUpLeft", "mouthUpperUpRight", "noseSneerLeft", "noseSneerRight",
+    "tongueOut",
+)
+
+
+def ordered_blendshapes(categories):
+    """把 MediaPipe 的 blendshape 按规范顺序排成 52 个分数（缺项补 0）。"""
+    by_name = {c.category_name: float(c.score) for c in categories}
+    return [by_name.get(name, 0.0) for name in ARKIT_ORDER]
+
+
 # 推理线程池：face 与 pose 两个模型并行执行（C++ 推理期间释放 GIL）
 INFER_POOL = ThreadPoolExecutor(max_workers=2)
 
@@ -71,7 +99,7 @@ def infer_face(face, frame, ts_ms):
         out["confidence"] = 1.0
         out["face_landmarks"] = [v for p in lm for v in (p.x, p.y, p.z)]
     if fr.face_blendshapes:
-        out["face_blendshapes"] = [c.score for c in fr.face_blendshapes[0]]
+        out["face_blendshapes"] = ordered_blendshapes(fr.face_blendshapes[0])
     return out
 
 
@@ -116,7 +144,7 @@ def run_selftest(model_dir):
     return 0
 
 
-def run_server(shm_name, model_dir, pose_every=2):
+def run_server(shm_name, model_dir, pose_every=4):
     face, pose = load_landmarkers(model_dir)
 
     with mmap.mmap(-1, SHARED_TOTAL, tagname=shm_name) as shm:
@@ -177,8 +205,9 @@ def main():
     parser.add_argument("--shm", default="lb_capture_frames")
     parser.add_argument("--model-dir", default=os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "models"))
-    parser.add_argument("--pose-every", type=int, default=2,
-                        help="body 模型每 N 帧更新一次（默认 2，降低 CPU 占用）")
+    parser.add_argument("--pose-every", type=int, default=4,
+                        help="body 模型每 N 帧更新一次（默认 4：躯干动作慢，"
+                             "把 CPU 让给人脸模型以提高头部姿态的帧率与响应）")
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
 

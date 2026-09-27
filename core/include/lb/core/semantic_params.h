@@ -34,6 +34,8 @@ struct BodyPose {
     float neck_pitch = 0.f;
     float neck_yaw = 0.f;
     float shoulder_shift = 0.f;
+    // 躯干上下平动：肩中点竖直位置相对自适应基线的偏移（-1 下 .. +1 上）
+    float position_y = 0.f;
 };
 
 struct SemanticParams {

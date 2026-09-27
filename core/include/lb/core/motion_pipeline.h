@@ -53,6 +53,10 @@ public:
     void stop();
     bool is_running() const;
     PipelineStats stats() const;
+    // 运行中调整平滑强度（0 接近原样透传，越大越平滑）
+    void set_smoothing(double smoothing);
+    // 运行中切换采集镜像
+    void set_mirror(bool enabled);
 
 private:
     void handle_frame(const FrameView& frame);
@@ -61,6 +65,9 @@ private:
     std::shared_ptr<ICaptureSource> capture_;
     std::shared_ptr<IFaceTracker> tracker_;
     SemanticSmoother smoother_;
+    SolveState solve_state_; // 自适应中性基线（消除人脸个体差异带来的恒定偏置）
+    SolveConfig solve_cfg_;  // 求解配置（含镜像状态）
+    std::atomic<double> pending_smoothing_{0.5}; // UI 请求的平滑强度（采集线程取用）
     ParamsCallback callback_;
     std::atomic<bool> running_{false};
 
@@ -68,6 +75,7 @@ private:
     PipelineStats stats_;
     std::chrono::steady_clock::time_point last_capture_ts_{};
     std::chrono::steady_clock::time_point last_infer_ts_{};
+    std::chrono::steady_clock::time_point last_solve_ts_{};
 };
 
 } // namespace lb::core

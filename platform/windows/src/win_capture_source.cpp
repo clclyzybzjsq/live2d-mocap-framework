@@ -149,6 +149,7 @@ bool WinCaptureSource::open(const std::string& device_id,
                             const lb::core::CaptureConfig& config) {
     close();
     config_ = config;
+    mirror_.store(config.mirror);
     if (device_id == synthetic_device_id()) {
         synthetic_ = true;
         return true;
@@ -267,6 +268,27 @@ lb::core::CaptureConfig WinCaptureSource::config() const {
     return config_;
 }
 
+void WinCaptureSource::set_mirror(bool enabled) {
+    config_.mirror = enabled;
+    mirror_.store(enabled);
+}
+
+namespace {
+// 水平镜像（原地翻转）。BGRA32，每像素 4 字节，逐行前后对调。
+// 放在采集端而不是渲染端：这样推理拿到的是镜像后的画面，
+// 转头方向也会跟着镜像，才是"照镜子"的观感。
+void mirror_bgra_inplace(uint8_t* buf, int w, int h) {
+    for (int y = 0; y < h; ++y) {
+        uint8_t* row = buf + static_cast<size_t>(y) * static_cast<size_t>(w) * 4u;
+        for (int x = 0; x < w / 2; ++x) {
+            uint8_t* a = row + static_cast<size_t>(x) * 4u;
+            uint8_t* b = row + static_cast<size_t>(w - 1 - x) * 4u;
+            for (int c = 0; c < 4; ++c) std::swap(a[c], b[c]);
+        }
+    }
+}
+} // namespace
+
 void WinCaptureSource::worker_loop() {
     if (synthetic_) {
         ensure_com();
@@ -331,6 +353,8 @@ void WinCaptureSource::worker_loop() {
                     p[0] = p[1] = p[2] = 60;
                 }
             }
+
+            if (mirror_.load()) mirror_bgra_inplace(buf.data(), w, h);
 
             lb::core::FrameView view;
             view.plane0 = buf.data();
@@ -404,6 +428,7 @@ void WinCaptureSource::worker_loop() {
                         }
                     }
                     if (filled) {
+                        if (mirror_.load()) mirror_bgra_inplace(dst, w, h);
                         lb::core::FrameView view;
                         view.plane0 = dst;
                         view.stride0 = static_cast<uint32_t>(w * 4);

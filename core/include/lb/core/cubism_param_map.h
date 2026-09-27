@@ -29,6 +29,7 @@ inline constexpr const char* kBrowRY = "ParamBrowRY";
 inline constexpr const char* kMouthOpenY = "ParamMouthOpenY";
 inline constexpr const char* kMouthForm = "ParamMouthForm";
 inline constexpr const char* kBodyAngleX = "ParamBodyAngleX";
+inline constexpr const char* kBodyAngleY = "ParamBodyAngleY";
 inline constexpr const char* kBodyAngleZ = "ParamBodyAngleZ";
 } // namespace cubism_param
 

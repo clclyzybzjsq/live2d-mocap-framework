@@ -24,6 +24,7 @@ public:
     void stop() override;
     bool is_running() const override;
     lb::core::CaptureConfig config() const override;
+    void set_mirror(bool enabled) override;
 
 private:
     struct Impl;
@@ -35,6 +36,8 @@ private:
     bool synthetic_ = false;
     lb::core::CaptureConfig config_;
     lb::core::FrameCallback callback_;
+    // 采集线程读取、UI 线程写入，用原子量避免数据竞争
+    std::atomic<bool> mirror_{false};
 };
 
 } // namespace lb::win

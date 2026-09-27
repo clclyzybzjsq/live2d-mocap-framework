@@ -5,6 +5,25 @@
 
 namespace lb::core {
 
+namespace {
+// 角度通道（度）使用独立的单帧步长上限
+SmootherConfig degree_config(const SmootherConfig& cfg) {
+    SmootherConfig c = cfg;
+    c.max_step = cfg.max_step_deg;
+    return c;
+}
+
+// 躯干通道用更重的平滑，并设一个下限。
+// 这些量来自 pose 关键点（肩线），噪声比人脸网格大得多：肩线倾角几度的抖动
+// 经满量程放大后在模型上肉眼可见。而躯干本来也不需要像头那样跟手，
+// 因此给它独立的平滑下限 —— 即使把"平滑强度"拉到很低，身体也不会抖。
+SmootherConfig torso_config(const SmootherConfig& cfg) {
+    SmootherConfig c = cfg;
+    c.smoothing = std::max(cfg.smoothing, 0.65);
+    return c;
+}
+} // namespace
+
 ParamSmoother::ParamSmoother(const SmootherConfig& cfg) : cfg_(cfg) {}
 
 float ParamSmoother::push(float input, double dt_s) {
@@ -31,12 +50,14 @@ void ParamSmoother::reset(float value) {
 
 SemanticSmoother::SemanticSmoother(const SmootherConfig& cfg)
     : cfg_(cfg),
-      head_yaw_(cfg), head_pitch_(cfg), head_roll_(cfg),
+      head_yaw_(degree_config(cfg)), head_pitch_(degree_config(cfg)),
+      head_roll_(degree_config(cfg)),
       eye_open_l_(cfg), eye_open_r_(cfg), look_x_(cfg), look_y_(cfg),
       brow_l_(cfg), brow_r_(cfg),
       mouth_open_(cfg), mouth_smile_(cfg), mouth_press_(cfg),
-      torso_tilt_(cfg), torso_sway_(cfg), neck_pitch_(cfg), neck_yaw_(cfg),
-      shoulder_shift_(cfg) {}
+      torso_tilt_(torso_config(cfg)), torso_sway_(torso_config(cfg)),
+      neck_pitch_(torso_config(cfg)), neck_yaw_(torso_config(cfg)),
+      shoulder_shift_(torso_config(cfg)), body_position_y_(torso_config(cfg)) {}
 
 SemanticParams SemanticSmoother::push(const SemanticParams& input, double dt_s) {
     SemanticParams out;
@@ -60,11 +81,36 @@ SemanticParams SemanticSmoother::push(const SemanticParams& input, double dt_s) 
     out.body.neck_pitch = neck_pitch_.push(input.body.neck_pitch, dt_s);
     out.body.neck_yaw = neck_yaw_.push(input.body.neck_yaw, dt_s);
     out.body.shoulder_shift = shoulder_shift_.push(input.body.shoulder_shift, dt_s);
+    out.body.position_y = body_position_y_.push(input.body.position_y, dt_s);
 
     out.face_detected = input.face_detected;
     out.face_confidence = input.face_confidence;
     out.timestamp_us = input.timestamp_us;
     return out;
+}
+
+void SemanticSmoother::set_config(const SmootherConfig& cfg) {
+    cfg_ = cfg;
+    const SmootherConfig deg = degree_config(cfg);
+    const SmootherConfig torso = torso_config(cfg);
+    head_yaw_.set_config(deg);
+    head_pitch_.set_config(deg);
+    head_roll_.set_config(deg);
+    eye_open_l_.set_config(cfg);
+    eye_open_r_.set_config(cfg);
+    look_x_.set_config(cfg);
+    look_y_.set_config(cfg);
+    brow_l_.set_config(cfg);
+    brow_r_.set_config(cfg);
+    mouth_open_.set_config(cfg);
+    mouth_smile_.set_config(cfg);
+    mouth_press_.set_config(cfg);
+    torso_tilt_.set_config(torso);
+    torso_sway_.set_config(torso);
+    neck_pitch_.set_config(torso);
+    neck_yaw_.set_config(torso);
+    shoulder_shift_.set_config(torso);
+    body_position_y_.set_config(torso);
 }
 
 void SemanticSmoother::reset() {
@@ -85,6 +131,7 @@ void SemanticSmoother::reset() {
     neck_pitch_.reset();
     neck_yaw_.reset();
     shoulder_shift_.reset();
+    body_position_y_.reset();
 }
 
 } // namespace lb::core
