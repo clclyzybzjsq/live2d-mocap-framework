@@ -146,7 +146,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // 注意：延迟到主窗口显示之后再创建 —— 渲染初始化涉及模型加载与 Cubism
     // 启动，耗时可能明显，放在构造函数里会让窗口迟迟不出现。
     QTimer::singleShot(0, this, [this]() {
-        render_surface_ = new CubismRenderSurface(this);
+        // 不设父窗口：作为子控件时它会干扰主窗口的局部绘制
+        render_surface_ = new CubismRenderSurface(nullptr);
         connect(render_surface_, &CubismRenderSurface::initialized, this, [this](bool ok) {
             if (CubismAvatarRenderer* r = render_surface_->renderer()) {
                 if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(r);
@@ -204,6 +205,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 MainWindow::~MainWindow() {
     if (pipeline_) pipeline_->stop();
+
+    // 渲染宿主无父窗口（独立顶层 widget，避免干扰主窗口绘制），需手动释放。
+    // 先解除消费者的引用，避免合成器/浮窗在渲染器销毁后仍持有它。
+    if (vcam_compositor_) vcam_compositor_->set_avatar_renderer(nullptr);
+    if (float_window_) float_window_->set_avatar_renderer(nullptr);
+    if (render_surface_) {
+        render_surface_->hide();
+        delete render_surface_;
+        render_surface_ = nullptr;
+    }
+
     if (float_window_) {
         float_window_->hide();
         delete float_window_;

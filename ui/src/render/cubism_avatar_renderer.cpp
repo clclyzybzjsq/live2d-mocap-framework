@@ -266,20 +266,28 @@ bool CubismAvatarRenderer::initialize_with_current_context(const Live2dModelInfo
     }
     glGetError(); // 清掉 glewInit 可能留下的 INVALID_ENUM
 
-    if (!build_model(model)) {
-        cubism_log("[cubism] 模型加载失败\n");
-        return false;
-    }
-
+    // 先建好并绑定 FBO，再创建 Cubism 渲染器：后者在 Initialize 时会按当前
+    // 绑定的 framebuffer 尺寸创建剪裁遮罩缓冲，若未绑定就会用宿主 widget 的
+    // 默认 framebuffer 尺寸，后续绘制尺寸不匹配会什么都画不出来
     QOpenGLFramebufferObjectFormat fmt;
     fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
     fmt.setSamples(0);
     fbo_ = std::make_unique<QOpenGLFramebufferObject>(width_, height_, fmt);
     if (!fbo_->isValid()) {
         cubism_log("[cubism] FBO 创建失败\n");
-        release_gl();
+        fbo_.reset();
         return false;
     }
+    fbo_->bind();
+    glViewport(0, 0, width_, height_);
+
+    if (!build_model(model)) {
+        cubism_log("[cubism] 模型加载失败\n");
+        fbo_->release();
+        fbo_.reset();
+        return false;
+    }
+    fbo_->release();
     ready_ = true;
     cubism_log("[cubism] 已在外部上下文中初始化（%dx%d）\n", width_, height_);
     return true;

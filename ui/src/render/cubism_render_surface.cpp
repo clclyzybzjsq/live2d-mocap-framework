@@ -8,8 +8,9 @@ namespace lb::ui {
 CubismRenderSurface::CubismRenderSurface(QWidget* parent) : QOpenGLWidget(parent) {
     cubism_log("[surface] 构造\n");
     // 这个 widget 不用于显示，只为拿到一个"在 Qt Widgets 应用里可用"的 GL 上下文。
-    // WA_DontShowOnScreen 是 Qt 为这类场景提供的属性：widget 会被"显示"（因此
-    // GL 上下文正常初始化）但不绘制到屏幕上，也不影响窗口布局。
+    // WA_DontShowOnScreen：widget 会被"显示"（GL 上下文因此正常初始化）但不绘制到屏幕。
+    // 注意：调用方不要给它设置父窗口 —— 作为子控件时它仍会占用/干扰父窗口的绘制区域
+    // （表现为主窗口局部渲染异常），因此这里要求它是独立顶层 widget。
     setAttribute(Qt::WA_DontShowOnScreen, true);
     resize(640, 480);
 }
