@@ -71,7 +71,7 @@ MocapPage::MocapPage(QWidget* parent) : QWidget(parent) {
 
     // 平滑强度：数值越大越平滑（也越迟滞），0 接近原样透传。
     // 这个滑块此前没有接任何逻辑，是个死控件；现在接到管线平滑器上。
-    smoothing_ = new SliderRow(QStringLiteral("平滑强度"), 0.0, 0.9, 0.2, form);
+    smoothing_ = new SliderRow(QStringLiteral("平滑强度"), 0.0, 0.9, 0.4, form);
     connect(smoothing_, &SliderRow::value_changed, this, &MocapPage::smoothing_changed);
     form_layout->addRow(QStringLiteral("参数"), smoothing_);
 
@@ -159,7 +159,7 @@ void MocapPage::set_motion_gain(double g) {
 }
 
 double MocapPage::smoothing() const {
-    return smoothing_ ? smoothing_->value() : 0.16;
+    return smoothing_ ? smoothing_->value() : 0.4;
 }
 
 void MocapPage::set_smoothing(double s) {
@@ -167,7 +167,7 @@ void MocapPage::set_smoothing(double s) {
 }
 
 double MocapPage::face_gain() const {
-    return face_gain_ ? face_gain_->value() : 1.3;
+    return face_gain_ ? face_gain_->value() : 0.96;
 }
 
 void MocapPage::set_face_gain(double g) {
