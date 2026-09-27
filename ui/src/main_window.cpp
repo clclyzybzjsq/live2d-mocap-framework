@@ -2,6 +2,7 @@
 
 #include <QApplication>
 #include <cstring>
+#include <QDebug>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -104,8 +105,12 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             });
     connect(output_page_, &OutputPage::floating_window_click_through, this,
             [this](bool enabled) { float_window_->set_click_through(enabled); });
-    connect(output_page_, &OutputPage::floating_window_scale, this,
-            [this](double scale) { float_window_->set_scale(scale); });
+    connect(output_page_, &OutputPage::floating_window_scale, this, [this](double scale) {
+        if (float_window_) float_window_->set_scale(scale);
+    });
+    connect(output_page_, &OutputPage::floating_window_overall_scale, this, [this](double scale) {
+        if (float_window_) float_window_->set_overall_scale(scale);
+    });
     connect(output_page_, &OutputPage::floating_window_opacity, this,
             [this](double opacity) { float_window_->set_opacity(opacity); });
 
@@ -133,12 +138,75 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     }
     connect(output_page_, &OutputPage::view_changed, this,
             [this](double zoom, double offset_x, double offset_y) {
-                if (render_surface_) render_surface_->set_view(zoom, offset_x, offset_y);
+                if (render_surface_) {
+                    render_surface_->set_view(zoom, offset_x, offset_y);
+                    // 立刻重跑一帧并让浮窗重画：否则要等下一次定时器才看到变化，
+                    // 且浮窗在管线未运行时根本不会重绘（表现为拖滑块没反应）
+                    render_surface_->update();
+                }
+                if (float_window_) float_window_->update();
                 QSettings settings;
                 settings.setValue(QStringLiteral("view/zoom"), zoom);
                 settings.setValue(QStringLiteral("view/offset_x"), offset_x);
                 settings.setValue(QStringLiteral("view/offset_y"), offset_y);
             });
+
+    // 动作幅度：恢复上次设置，并在变化时应用到渲染器
+    {
+        QSettings settings;
+        mocap_page_->set_motion_gain(
+            settings.value(QStringLiteral("mocap/gain"), mocap_page_->motion_gain()).toDouble());
+    }
+    connect(mocap_page_, &MocapPage::motion_gain_changed, this, [this](double gain) {
+        if (render_surface_) render_surface_->set_motion_gain(static_cast<float>(gain));
+        QSettings settings;
+        settings.setValue(QStringLiteral("mocap/gain"), gain);
+    });
+
+    // 平滑强度：恢复上次设置；管线未运行时先存着，启动时随配置一起下发
+    {
+        QSettings settings;
+        mocap_page_->set_smoothing(
+            settings.value(QStringLiteral("mocap/smoothing"), mocap_page_->smoothing()).toDouble());
+    }
+    connect(mocap_page_, &MocapPage::smoothing_changed, this, [this](double value) {
+        if (pipeline_) pipeline_->set_smoothing(value);
+        QSettings settings;
+        settings.setValue(QStringLiteral("mocap/smoothing"), value);
+    });
+
+    // 表情幅度：恢复上次设置，并在变化时应用到渲染器
+    {
+        QSettings settings;
+        mocap_page_->set_face_gain(
+            settings.value(QStringLiteral("mocap/face_gain"), mocap_page_->face_gain()).toDouble());
+    }
+    connect(mocap_page_, &MocapPage::face_gain_changed, this, [this](double gain) {
+        if (render_surface_) render_surface_->set_face_gain(static_cast<float>(gain));
+        QSettings settings;
+        settings.setValue(QStringLiteral("mocap/face_gain"), gain);
+    });
+
+    // 镜像：采集端翻转（位于推理之前，转头方向会一起镜像）。
+    // 管线未运行时先存着，启动时随 CaptureConfig 一起下发。
+    {
+        QSettings settings;
+        const bool m = settings.value(QStringLiteral("mocap/mirror"), false).toBool();
+        if (mocap_page_) mocap_page_->set_mirror(m);
+    }
+    connect(mocap_page_, &MocapPage::mirror_changed, this, [this](bool enabled) {
+        if (pipeline_) pipeline_->set_mirror(enabled);
+        QSettings settings;
+        settings.setValue(QStringLiteral("mocap/mirror"), enabled);
+    });
+
+    // 「应用」：摄像头/分辨率/帧率只在管线启动时下发，所以运行中就用新配置
+    // 重启一次；未运行则什么都不用做（开始动捕时自然带上新配置）
+    connect(mocap_page_, &MocapPage::apply_requested, this, [this]() {
+        if (!running_) return;
+        set_running(false);
+        set_running(true);
+    });
 
     // 形象渲染：用一个移到屏幕外的 QOpenGLWidget 作为渲染宿主。
     // Qt Widgets 应用里自建的离屏 GL 上下文渲染不出内容（全透明），
@@ -154,6 +222,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 if (float_window_) float_window_->set_avatar_renderer(r);
                 render_surface_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
                                           output_page_->view_offset_y());
+                render_surface_->set_motion_gain(static_cast<float>(mocap_page_->motion_gain()));
+                render_surface_->set_face_gain(static_cast<float>(mocap_page_->face_gain()));
             }
             status_model_->setText(
                 ok ? QStringLiteral("模型: %1（Cubism）").arg(current_model_.name)
@@ -184,6 +254,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             render_surface_->set_semantics(sem);
             render_surface_->update();
         }
+        // 浮窗是给用户看的显示端，必须持续重绘 —— 它此前只在管线回调里 update，
+        // 摄像头没开时画面就冻住，取景/整体缩放这些改动自然也看不到
+        if (float_window_) float_window_->update();
 
         if (!vcam_ || !vcam_->is_running() || !vcam_compositor_) return;
         lb::core::FrameView cam;
@@ -200,7 +273,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         const lb::core::FrameView* out = vcam_compositor_->compose(cam, sem);
         if (out) vcam_->push_frame(*out);
     });
-    avatar_timer_->start(33); // 约 30fps
+    // 渲染/合成节拍。动捕只有约 15fps，但渲染本身很便宜（单帧 2~3ms），
+    // 这里按 60fps 跑，配合渲染帧率上的插值让动作连续。
+    avatar_timer_->start(16);
 }
 
 MainWindow::~MainWindow() {
@@ -350,6 +425,7 @@ void MainWindow::set_running(bool running) {
     cfg.device_id = mocap_page_->device_id().toStdString();
     cfg.capture = mocap_page_->capture_config();
     cfg.inference.model_dir = env_or("LB_MODEL_DIR", "D:/ournotes_vtube/inference/models");
+    cfg.smoothing.smoothing = mocap_page_->smoothing();
 
     if (!pipeline_->initialize(cfg)) {
         set_running(false); // 回到未运行态；状态描述留给状态栏

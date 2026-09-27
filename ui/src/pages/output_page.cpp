@@ -15,9 +15,12 @@
 namespace lb::ui {
 
 namespace {
-// 默认取景：上半身（此模型画布偏大，需要较大缩放才能得到上半身特写）
-constexpr double kDefaultViewZoom = 4.5;
-constexpr double kDefaultViewOffsetY = 0.0;
+// 默认取景预设：VTuber 直播常见的头胸像（实测标定值）。
+// zoom 是倍率（SetWidth 的基准，模型画布宽 1.0，故模型在取景空间里的高度为 1.5*zoom）；
+// offset 以「半个模型尺寸」为单位，±1 即可覆盖模型从顶到底的全部范围。
+constexpr double kDefaultViewZoom = 3.0;
+constexpr double kDefaultViewOffsetX = 0.0;
+constexpr double kDefaultViewOffsetY = -0.5;
 } // namespace
 
 OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
@@ -90,10 +93,18 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
             &OutputPage::floating_window_click_through);
     float_layout->addRow(QStringLiteral("点击穿透"), through_switch);
 
-    auto* scale = new SliderRow(QStringLiteral("缩放"), 0.2, 1.5, 1.0, float_box);
+    // 注意：这一项控制的是浮窗自身的窗口大小，与下面"画面取景"的缩放无关，
+    // 因此标签直接写成"窗口大小"，避免和取景缩放混淆
+    auto* scale = new SliderRow(QStringLiteral("窗口大小"), 0.2, 1.5, 1.0, float_box);
     connect(scale, &SliderRow::value_changed, this,
             &OutputPage::floating_window_scale);
     float_layout->addRow(QStringLiteral("浮窗"), scale);
+
+    // 整体缩放：窗口与窗内画面一起放大，模型显示变大但取景裁剪不变
+    auto* overall = new SliderRow(QStringLiteral("整体缩放"), 0.5, 2.5, 1.0, float_box);
+    connect(overall, &SliderRow::value_changed, this,
+            &OutputPage::floating_window_overall_scale);
+    float_layout->addRow(QStringLiteral("浮窗"), overall);
 
     auto* opacity = new SliderRow(QStringLiteral("透明度"), 0.1, 1.0, 1.0, float_box);
     connect(opacity, &SliderRow::value_changed, this,
@@ -113,15 +124,19 @@ OutputPage::OutputPage(QWidget* parent) : QWidget(parent) {
     view_layout->setHorizontalSpacing(10);
     view_layout->setVerticalSpacing(8);
 
-    view_zoom_ = new SliderRow(QStringLiteral("缩放"), 0.5, 9.0, kDefaultViewZoom, view_box);
+    // 取景缩放用对数刻度：范围跨两个数量级（0.2 全身 ~ 40 特写），
+    // 线性刻度下小倍率会几乎拖不动
+    view_zoom_ = new SliderRow(QStringLiteral("缩放"), 0.2, 40.0, kDefaultViewZoom, view_box, true);
     view_layout->addRow(QStringLiteral("取景"), view_zoom_);
-    view_ox_ = new SliderRow(QStringLiteral("水平"), -1.0, 1.0, 0.0, view_box);
+    // 平移以"半个模型尺寸"为单位：±1 即可覆盖模型从顶到底的全部范围，±2 留余量。
+    // 必须在任何缩放倍率下都够用，所以不能是固定的取景空间单位。
+    view_ox_ = new SliderRow(QStringLiteral("水平"), -2.0, 2.0, kDefaultViewOffsetX, view_box);
     view_layout->addRow(QStringLiteral("位置"), view_ox_);
-    view_oy_ = new SliderRow(QStringLiteral("垂直"), -1.0, 1.0, kDefaultViewOffsetY, view_box);
+    view_oy_ = new SliderRow(QStringLiteral("垂直"), -2.0, 2.0, kDefaultViewOffsetY, view_box);
     view_layout->addRow(QString(), view_oy_);
 
     auto* view_hint = new QLabel(
-        QStringLiteral("默认取上半身；放大可做特写，配合位置可自由裁剪取景范围"), view_box);
+        QStringLiteral("缩放：对数刻度，0.2 全身 ~ 40 特写；位置：±1 等于移动半个模型尺寸"), view_box);
     view_hint->setObjectName("HintText");
     view_layout->addRow(QString(), view_hint);
 
@@ -159,7 +174,9 @@ void OutputPage::set_float_checked(bool on) {
 
 double OutputPage::view_zoom() const { return view_zoom_ ? view_zoom_->value() : kDefaultViewZoom; }
 
-double OutputPage::view_offset_x() const { return view_ox_ ? view_ox_->value() : 0.0; }
+double OutputPage::view_offset_x() const {
+    return view_ox_ ? view_ox_->value() : kDefaultViewOffsetX;
+}
 
 double OutputPage::view_offset_y() const {
     return view_oy_ ? view_oy_->value() : kDefaultViewOffsetY;

@@ -36,6 +36,7 @@ signals:
     void floating_window_toggled(bool visible);
     void floating_window_click_through(bool enabled);
     void floating_window_scale(double scale);
+    void floating_window_overall_scale(double scale);
     void floating_window_opacity(double opacity);
     void virtual_camera_toggled(bool on);
     void vcam_background_only_toggled(bool on);

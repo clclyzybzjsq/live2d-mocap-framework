@@ -66,11 +66,28 @@ MocapPage::MocapPage(QWidget* parent) : QWidget(parent) {
 
     // 镜像
     mirror_switch_ = new ToggleSwitch(form);
+    connect(mirror_switch_, &ToggleSwitch::clicked, this, &MocapPage::mirror_changed);
     form_layout->addRow(QStringLiteral("镜像"), mirror_switch_);
 
-    // 灵敏度
-    auto* sensitivity = new SliderRow(QStringLiteral("灵敏度"), 0.0, 1.0, 0.5, form);
-    form_layout->addRow(QStringLiteral("参数"), sensitivity);
+    // 平滑强度：数值越大越平滑（也越迟滞），0 接近原样透传。
+    // 这个滑块此前没有接任何逻辑，是个死控件；现在接到管线平滑器上。
+    smoothing_ = new SliderRow(QStringLiteral("平滑强度"), 0.0, 0.9, 0.2, form);
+    connect(smoothing_, &SliderRow::value_changed, this, &MocapPage::smoothing_changed);
+    form_layout->addRow(QStringLiteral("参数"), smoothing_);
+
+    // 动作幅度：头颈/躯干的转动量整体倍率。
+    // 摄像头姿态解算出的角度往往偏小，模型上几乎看不出动作，用这个放大。
+    motion_gain_ = new SliderRow(QStringLiteral("动作幅度"), 0.2, 3.0, 1.0, form);
+    connect(motion_gain_, &SliderRow::value_changed, this,
+            &MocapPage::motion_gain_changed);
+    form_layout->addRow(QStringLiteral("参数"), motion_gain_);
+
+    // 表情幅度：眼睛开合/眉毛/嘴部表情的整体倍率。
+    // 表情系数普遍偏小（自然闭眼只到 0.7~0.9、说话时 jawOpen 只有 0.3~0.5），
+    // 默认给 1.5 让闭眼能闭严、说话时嘴部动作明显。
+    face_gain_ = new SliderRow(QStringLiteral("表情幅度"), 0.5, 3.0, 0.96, form);
+    connect(face_gain_, &SliderRow::value_changed, this, &MocapPage::face_gain_changed);
+    form_layout->addRow(QStringLiteral("参数"), face_gain_);
 
     // 置信度
     confidence_bar_ = new QProgressBar(form);
@@ -133,8 +150,39 @@ void MocapPage::set_confidence(int percent) {
     confidence_bar_->setValue(std::clamp(percent, 0, 100));
 }
 
+double MocapPage::motion_gain() const {
+    return motion_gain_ ? motion_gain_->value() : 1.0;
+}
+
+void MocapPage::set_motion_gain(double g) {
+    if (motion_gain_) motion_gain_->set_value(g);
+}
+
+double MocapPage::smoothing() const {
+    return smoothing_ ? smoothing_->value() : 0.16;
+}
+
+void MocapPage::set_smoothing(double s) {
+    if (smoothing_) smoothing_->set_value(s);
+}
+
+double MocapPage::face_gain() const {
+    return face_gain_ ? face_gain_->value() : 1.3;
+}
+
+void MocapPage::set_face_gain(double g) {
+    if (face_gain_) face_gain_->set_value(g);
+}
+
+void MocapPage::set_mirror(bool enabled) {
+    if (mirror_switch_) mirror_switch_->setChecked(enabled);
+}
+
 void MocapPage::apply_config() {
     const auto config = capture_config();
+    // 摄像头/分辨率/帧率只在管线启动时下发，所以这里真正的动作是
+    // 请求 MainWindow 用新配置重启动捕（此前这个按钮只改了文字）
+    emit apply_requested();
     status_label_->setText(
         QStringLiteral("已应用: %1x%2 @ %3 FPS")
             .arg(config.width).arg(config.height).arg(config.fps));

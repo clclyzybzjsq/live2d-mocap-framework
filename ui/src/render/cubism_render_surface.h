@@ -3,10 +3,12 @@
 #include <QImage>
 #include <QOpenGLWidget>
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 
 #include "lb/core/semantic_params.h"
+#include "lb/core/smoothing.h"
 #include "live2d_model_library.h"
 
 namespace lb::ui {
@@ -40,6 +42,10 @@ public:
 
     // 取景（缩放 + 位置）
     void set_view(float zoom, float offset_x, float offset_y);
+    // 动作幅度（头颈/躯干转动量倍率）
+    void set_motion_gain(float g);
+    // 表情幅度（眼睛开合/眉毛/嘴部表情的倍率）
+    void set_face_gain(float g);
 
 signals:
     void initialized(bool ok);
@@ -54,6 +60,11 @@ private:
     bool has_pending_model_ = false;
     lb::core::SemanticParams semantics_;
     mutable std::mutex mutex_;
+
+    // 渲染帧率上的插值器：动捕帧率远低于渲染帧率，靠它在动捕样本之间补帧，
+    // 否则动作是台阶状的。时间常数取小值（几十毫秒）以尽量不增加延迟。
+    lb::core::SemanticSmoother interp_{lb::core::SmootherConfig{0.25, 0.5, 60.0}};
+    std::chrono::steady_clock::time_point last_paint_ts_{};
 };
 
 } // namespace lb::ui

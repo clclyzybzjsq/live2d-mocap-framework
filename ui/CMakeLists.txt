@@ -119,7 +119,7 @@ if(LB_BUILD_CUBISM_TEST AND LB_WITH_CUBISM)
         "${LB_CUBISM_SDK_DIR}/Core/include"
         "${LB_CUBISM_SDK_DIR}/Framework/src")
     target_link_libraries(lb_cubism_renderer_test PRIVATE
-        Qt6::Gui Qt6::OpenGL Framework "${LB_CUBISM_CORE_IMPLIB}" lb_core)
+        Qt6::Gui Qt6::OpenGL Qt6::OpenGLWidgets Framework "${LB_CUBISM_CORE_IMPLIB}" lb_core)
     target_compile_features(lb_cubism_renderer_test PRIVATE cxx_std_17)
     if(NOT MSVC)
         target_compile_options(lb_cubism_renderer_test PRIVATE -fpermissive)

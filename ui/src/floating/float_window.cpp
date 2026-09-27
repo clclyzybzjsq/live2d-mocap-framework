@@ -68,9 +68,19 @@ void FloatWindowWidget::set_click_through(bool enabled) {
 
 void FloatWindowWidget::set_scale(double scale) {
     scale_ = std::clamp(scale, 0.3, 3.0);
+    apply_size();
+}
+
+void FloatWindowWidget::set_overall_scale(double scale) {
+    overall_scale_ = std::clamp(scale, 0.5, 2.5);
+    apply_size();
+}
+
+void FloatWindowWidget::apply_size() {
     const QPoint center = geometry().center();
-    resize(QSize(static_cast<int>(kBaseWidth * scale_),
-                 static_cast<int>(kBaseHeight * scale_)));
+    const int w = static_cast<int>(kBaseWidth * scale_ * overall_scale_);
+    const int h = static_cast<int>(kBaseHeight * scale_ * overall_scale_);
+    resize(QSize(std::max(w, 80), std::max(h, 80)));
     move(center - QPoint(width() / 2, height() / 2));
     update();
 }
@@ -101,7 +111,19 @@ void FloatWindowWidget::paintEvent(QPaintEvent* event) {
         }
         canvas_.fill(Qt::transparent);
         avatar_renderer_->render(canvas_, sem);
-        p.drawImage(0, 0, canvas_);
+        if (overall_scale_ == 1.0) {
+            p.drawImage(0, 0, canvas_);
+        } else {
+            // 整体缩放：以窗口中心为锚点放大/缩小画面，超出部分由窗口裁掉。
+            // 这里不碰模型的取景参数，只改显示大小。
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.save();
+            p.translate(width() * 0.5, height() * 0.5);
+            p.scale(overall_scale_, overall_scale_);
+            p.translate(-width() * 0.5, -height() * 0.5);
+            p.drawImage(0, 0, canvas_);
+            p.restore();
+        }
     } else {
         p.setRenderHint(QPainter::Antialiasing, true);
         paint_avatar(p, width(), height(), sem);
@@ -176,6 +198,7 @@ void FloatWindowWidget::save_geometry() {
     QSettings settings(QStringLiteral("YunoLab"), QStringLiteral("livebridge"));
     settings.setValue(QStringLiteral("float/geometry"), saveGeometry());
     settings.setValue(QStringLiteral("float/scale"), scale_);
+    settings.setValue(QStringLiteral("float/overall_scale"), overall_scale_);
 }
 
 void FloatWindowWidget::load_geometry() {
@@ -183,6 +206,7 @@ void FloatWindowWidget::load_geometry() {
     const QByteArray geo = settings.value(QStringLiteral("float/geometry")).toByteArray();
     if (!geo.isEmpty()) restoreGeometry(geo);
     scale_ = settings.value(QStringLiteral("float/scale"), 1.0).toDouble();
+    overall_scale_ = settings.value(QStringLiteral("float/overall_scale"), 1.0).toDouble();
 }
 
 // ---------------- FloatToolbar ----------------

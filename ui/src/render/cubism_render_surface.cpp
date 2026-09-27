@@ -3,6 +3,8 @@
 #include "cubism_avatar_renderer.h"
 #include "cubism_runtime.h" // cubism_log
 
+#include <algorithm>
+
 namespace lb::ui {
 
 CubismRenderSurface::CubismRenderSurface(QWidget* parent) : QOpenGLWidget(parent) {
@@ -36,6 +38,7 @@ void CubismRenderSurface::set_model(const Live2dModelInfo& model) {
         renderer_ = std::make_unique<CubismAvatarRenderer>();
         const bool ok = renderer_->initialize_with_current_context(model);
         doneCurrent();
+        interp_.reset(); // 换模型后不要从上一个模型的姿态插值过去
         emit initialized(ok);
     }
     update();
@@ -48,6 +51,14 @@ void CubismRenderSurface::set_semantics(const lb::core::SemanticParams& sem) {
 
 void CubismRenderSurface::set_view(float zoom, float offset_x, float offset_y) {
     if (renderer_) renderer_->set_view(zoom, offset_x, offset_y);
+}
+
+void CubismRenderSurface::set_motion_gain(float g) {
+    if (renderer_) renderer_->set_motion_gain(g);
+}
+
+void CubismRenderSurface::set_face_gain(float g) {
+    if (renderer_) renderer_->set_face_gain(g);
 }
 
 QImage CubismRenderSurface::frame() const {
@@ -76,11 +87,25 @@ void CubismRenderSurface::initializeGL() {
 
 void CubismRenderSurface::paintGL() {
     if (!renderer_ || !renderer_->model_bound()) return;
-    lb::core::SemanticParams sem;
+    lb::core::SemanticParams target;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        sem = semantics_;
+        target = semantics_;
     }
+
+    // 动捕帧率（约 15fps）明显低于渲染帧率（60fps）。把动捕样本直接贴到模型上，
+    // 动作会呈台阶状；这里在渲染帧率上做一次时间常数很短的低通，等价于在动捕
+    // 样本之间插值 —— 动作连续，而时间常数只有几十毫秒，几乎不增加可感延迟。
+    const auto now = std::chrono::steady_clock::now();
+    double dt = 1.0 / 60.0;
+    if (last_paint_ts_.time_since_epoch().count() != 0) {
+        dt = std::chrono::duration<double>(now - last_paint_ts_).count();
+    }
+    last_paint_ts_ = now;
+    dt = std::clamp(dt, 0.001, 0.2);
+
+    const lb::core::SemanticParams sem = interp_.push(target, dt);
+
     // 上下文此时由 Qt 保证为 current，直接渲染到渲染器自己的 FBO 并读回缓存
     renderer_->render_once(sem);
 }

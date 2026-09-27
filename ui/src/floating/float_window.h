@@ -35,6 +35,9 @@ public slots:
     void set_frame(const FrameSnapshot& snap);
     void set_click_through(bool enabled);
     void set_scale(double scale);
+    // 整体缩放：浮窗窗口与窗内画面一起放大/缩小。
+    // 与"画面取景"的缩放不同 —— 取景改的是模型的裁剪范围，这里只改显示大小。
+    void set_overall_scale(double scale);
     void set_opacity(double opacity);
 
 public:
@@ -60,6 +63,7 @@ private:
     void sync_toolbar();
     void save_geometry();
     void load_geometry();
+    void apply_size();
 
     std::mutex mutex_;
     lb::core::SemanticParams semantic_;
@@ -73,6 +77,9 @@ private:
     bool draggable_ = true;
     bool click_through_ = false;
     double scale_ = 1.0;
+    // 整体缩放倍率：窗口尺寸与窗内画面同倍率放大（画面相对窗口还会再放大一档，
+    // 因此模型在浮窗里占的比例也随之变大，而不是留出更多空白）
+    double overall_scale_ = 1.0;
 
     FloatToolbar* toolbar_ = nullptr;
     bool toolbar_visible_ = false;
