@@ -100,8 +100,8 @@ private:
     float offset_x_ = 0.0f;
     float offset_y_ = -0.5f;
     float motion_gain_ = 1.0f;
-    float eye_gain_ = 0.96f;
-    float mouth_gain_ = 0.96f;
+    float eye_gain_ = 1.10f;
+    float mouth_gain_ = 3.00f;
     float time_seconds_ = 0.0f;
     bool gl_ready_ = false;
     bool ready_ = false;

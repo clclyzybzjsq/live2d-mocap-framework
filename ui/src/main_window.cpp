@@ -181,12 +181,16 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     // 这样老配置升上来不会突然变成别的数值。
     {
         QSettings settings;
-        const double legacy =
-            settings.value(QStringLiteral("mocap/face_gain"), mocap_page_->eye_gain()).toDouble();
+        // 只有旧键真的存在时才用它做迁移值；否则各自的构造默认值（1.10 / 3.00）
+        // 会被互相顶掉 —— 之前两者都会退化成眼部的值
+        const bool has_legacy = settings.contains(QStringLiteral("mocap/face_gain"));
+        const double legacy = settings.value(QStringLiteral("mocap/face_gain")).toDouble();
         mocap_page_->set_eye_gain(
-            settings.value(QStringLiteral("mocap/eye_gain"), legacy).toDouble());
+            settings.value(QStringLiteral("mocap/eye_gain"),
+                           has_legacy ? legacy : mocap_page_->eye_gain()).toDouble());
         mocap_page_->set_mouth_gain(
-            settings.value(QStringLiteral("mocap/mouth_gain"), legacy).toDouble());
+            settings.value(QStringLiteral("mocap/mouth_gain"),
+                           has_legacy ? legacy : mocap_page_->mouth_gain()).toDouble());
     }
     connect(mocap_page_, &MocapPage::eye_gain_changed, this, [this](double gain) {
         if (render_surface_) render_surface_->set_eye_gain(static_cast<float>(gain));

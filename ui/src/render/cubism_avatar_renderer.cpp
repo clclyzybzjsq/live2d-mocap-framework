@@ -124,8 +124,26 @@ public:
         }
         GetModelMatrix()->SetupFromLayout(layout_);
 
-        GetModel()->SaveParameters();
         return true;
+    }
+
+    // 只复位"表情碰过的那几个参数"到模型默认值。
+    //
+    // 不要用 SaveParameters/LoadParameters 整表复位：那份快照是在模型还没
+    // Update 过的时候存的，把所有参数拉回默认会连带把其它通道一起清掉，
+    // 实测会让模型直接塌成空白（顶点范围正常、drawable 可见，画面却全空）。
+    //
+    // 每帧复位一次是必要的：表情会写我们不驱动的参数（ParameyelidL/R、
+    // ParamEyeLSmile、ParamMouthStrength 等），且 Blend=Add 的项若不先归位
+    // 会逐帧累加。
+    void reset_expression_params() {
+        Csm::CubismModel* m = GetModel();
+        if (!m) return;
+        for (csmInt32 idx : expression_touched_) {
+            if (idx >= 0 && idx < m->GetParameterCount()) {
+                m->SetParameterValue(idx, m->GetParameterDefaultValue(idx), 1.0f);
+            }
+        }
     }
 
     // ---- 表情 ----
@@ -143,13 +161,26 @@ public:
 
     void set_expression(int index) {
         if (!_expressionManager || !GetModel()) return;
+        // 切换前先把上一个表情改过的参数归位：否则切到「无表情」时那些参数
+        // 会停在表情值上，脸继续保持着表情。
+        reset_expression_params();
         _expressionManager->StopAllMotions();
         current_expression_ = -1;
+        expression_touched_.clear();
         if (index >= 0 && index < static_cast<int>(expressions_.size())) {
             // autoDelete=false：motion 对象由本类持有并在析构时释放，
             // 交给队列删除的话再切回来就是悬空指针
             _expressionManager->StartMotion(expressions_[index].motion, false);
             current_expression_ = index;
+            // 记下这个表情会写到哪些参数，供每帧复位与切换时清理
+            auto* em = static_cast<CubismExpressionMotion*>(expressions_[index].motion);
+            const csmVector<CubismExpressionMotion::ExpressionParameter> params =
+                em->GetExpressionParameters();
+            for (csmInt32 i = 0; i < params.GetSize(); ++i) {
+                if (!params[i].ParameterId) continue;
+                const csmInt32 pi = GetModel()->GetParameterIndex(params[i].ParameterId);
+                if (pi >= 0) expression_touched_.push_back(pi);
+            }
         }
     }
 
@@ -194,6 +225,19 @@ public:
                 cubism_log("[cubism] 顶点范围 x=[%.3f,%.3f] y=[%.3f,%.3f] drawables=%d 可见=%d\n",
                            bounds_min_x_, bounds_max_x_, bounds_min_y_, bounds_max_y_,
                            static_cast<int>(dn), static_cast<int>(visible));
+                // 遮罩统计：带遮罩的 drawable 会走另一套 shader 与遮罩缓冲，
+                // 出问题时表现就是"结构简单的模型正常、复杂的全空"
+                csmInt32 masked = 0;
+                csmInt32 mask_refs = 0;
+                for (csmInt32 i = 0; i < dn; ++i) {
+                    const csmInt32 mc = m->GetDrawableMaskCounts()[i];
+                    if (mc > 0) {
+                        ++masked;
+                        mask_refs += mc;
+                    }
+                }
+                cubism_log("[cubism] 带遮罩 drawable=%d 遮罩引用=%d\n", static_cast<int>(masked),
+                           static_cast<int>(mask_refs));
             }
         }
         // 视口宽高比补偿。这里只用"视口"宽高比：
@@ -367,6 +411,8 @@ private:
     std::vector<unsigned int> textures_;
     std::vector<ExpressionEntry> expressions_;
     int current_expression_ = -1;
+    // 当前（或刚被切走）的表情写到的参数索引，用于每帧归位与切换时清理
+    std::vector<csmInt32> expression_touched_;
     csmMap<csmString, csmFloat32> layout_; // 布局信息：每帧据此重建模型矩阵
     // 顶点包围盒（加载时统计）
     float bounds_min_x_ = -0.5f;
@@ -502,8 +548,9 @@ bool CubismAvatarRenderer::initialize_with_current_context(const Live2dModelInfo
         const auto* ren = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
         cubism_log("[cubism] 上下文 GL=%s | %s\n", ver ? ver : "?", ren ? ren : "?");
     }
-    // （曾经尝试"先建 FBO 并绑定、再 CreateRenderer"来修正遮罩缓冲尺寸，
-    //   实测反而让渲染结果变成全透明，故保持这个顺序。）
+    // 注意顺序：先创建模型与 Cubism 渲染器，再创建 FBO。
+    // （曾两次尝试"先建 FBO 并绑定、再 CreateRenderer"想修正遮罩缓冲尺寸，
+    //   两次都让绘制整体失效，故保持这个顺序。）
     if (!build_model(model)) {
         cubism_log("[cubism] 模型加载失败\n");
         return false;
@@ -525,6 +572,8 @@ bool CubismAvatarRenderer::initialize_with_current_context(const Live2dModelInfo
 
 void CubismAvatarRenderer::render_once(const lb::core::SemanticParams& sem) {
     if (!ready_ || !fbo_) return;
+    // 先让表情碰过的参数归位（防止 Add 累加 / 残留），再叠动捕参数、再叠表情
+    if (runtime_) runtime_->reset_expression_params();
     apply_params(sem);
     // 表情是参数覆盖，必须在 Update() 之前施加（Update 才把参数烘进顶点）
     if (runtime_) runtime_->apply_expression(expression_dt());
@@ -721,6 +770,7 @@ void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
     if (!ready_) return;
     if (!context_->makeCurrent(surface_.get())) return;
 
+    if (runtime_) runtime_->reset_expression_params();
     apply_params(sem);
     if (runtime_) runtime_->apply_expression(expression_dt());
     if (runtime_->model()) runtime_->model()->Update();

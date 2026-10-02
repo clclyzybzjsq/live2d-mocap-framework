@@ -87,11 +87,11 @@ MocapPage::MocapPage(QWidget* parent) : QWidget(parent) {
     // 默认给 1.5 让闭眼能闭严、说话时嘴部动作明显。
     // 眼部/口部幅度分开调：两者需要的放大倍数往往不同
     //（表情系数普遍偏小：自然闭眼只到 0.7~0.9、说话时 jawOpen 只有 0.3~0.5）
-    eye_gain_ = new SliderRow(QStringLiteral("眼部幅度"), 0.5, 3.0, 0.96, form);
+    eye_gain_ = new SliderRow(QStringLiteral("眼部幅度"), 0.5, 3.0, 1.10, form);
     connect(eye_gain_, &SliderRow::value_changed, this, &MocapPage::eye_gain_changed);
     form_layout->addRow(QStringLiteral("参数"), eye_gain_);
 
-    mouth_gain_ = new SliderRow(QStringLiteral("口部幅度"), 0.5, 3.0, 0.96, form);
+    mouth_gain_ = new SliderRow(QStringLiteral("口部幅度"), 0.5, 3.0, 3.00, form);
     connect(mouth_gain_, &SliderRow::value_changed, this, &MocapPage::mouth_gain_changed);
     form_layout->addRow(QStringLiteral("参数"), mouth_gain_);
 
@@ -173,7 +173,7 @@ void MocapPage::set_smoothing(double s) {
 }
 
 double MocapPage::eye_gain() const {
-    return eye_gain_ ? eye_gain_->value() : 0.96;
+    return eye_gain_ ? eye_gain_->value() : 1.10;
 }
 
 void MocapPage::set_eye_gain(double g) {
@@ -181,7 +181,7 @@ void MocapPage::set_eye_gain(double g) {
 }
 
 double MocapPage::mouth_gain() const {
-    return mouth_gain_ ? mouth_gain_->value() : 0.96;
+    return mouth_gain_ ? mouth_gain_->value() : 3.00;
 }
 
 void MocapPage::set_mouth_gain(double g) {
