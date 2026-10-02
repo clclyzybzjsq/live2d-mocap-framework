@@ -79,11 +79,19 @@ public:
                     continue;
                 }
                 std::string name = file;
+                // File 形如 "expressions/exp_sad02.exp3.json"：目录和扩展名都要去掉，
+                // 只留 exp_xxx（列表里要显示的就是这个）
+                const size_t slash = name.find_last_of("/\\");
+                if (slash != std::string::npos) name = name.substr(slash + 1);
                 const size_t ext = name.find(".exp3");
                 if (ext != std::string::npos) name = name.substr(0, ext);
                 ACubismMotion* motion = LoadExpression(
                     bytes.data.data(), static_cast<csmSizeInt>(bytes.data.size()), name.c_str());
-                if (motion) expressions_.push_back(ExpressionEntry{name, motion});
+                if (motion) {
+                    expressions_.push_back(ExpressionEntry{name, motion});
+                } else {
+                    cubism_log("[cubism] 表情解析失败: %s\n", name.c_str());
+                }
             }
             cubism_log("[cubism] 表情 %d 个\n", static_cast<int>(expressions_.size()));
         }

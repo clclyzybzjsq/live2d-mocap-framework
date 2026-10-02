@@ -213,6 +213,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (render_surface_) render_surface_->set_expression(index);
     });
 
+    // 工具条的「关闭」走的是浮窗自己的隐藏，输出页的开关要跟着归位，
+    // 否则开关显示"开"而窗口已经没了，再点也打不开
+    if (float_window_) {
+        connect(float_window_, &FloatWindowWidget::closed_by_user, this,
+                [this]() { output_page_->set_float_checked(false); });
+    }
+
+    // 参数条：拖动状态决定该通道是否暂时由手动值接管
+    connect(models_page_, &ModelsPage::param_edited, this,
+            [this](const QString& key, double value) { semantic_set(manual_semantic_, key, value); });
+    connect(models_page_, &ModelsPage::param_drag_state, this,
+            [this](const QString& key, bool dragging) {
+                if (dragging) {
+                    manual_dragging_.insert(key);
+                } else {
+                    manual_dragging_.remove(key);
+                }
+            });
+
     // 形象渲染：用一个移到屏幕外的 QOpenGLWidget 作为渲染宿主。
     // Qt Widgets 应用里自建的离屏 GL 上下文渲染不出内容（全透明），
     // 而 QOpenGLWidget 提供的上下文可以正常工作。
@@ -254,6 +273,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
             std::lock_guard<std::mutex> lock(semantic_mutex_);
             sem = last_semantic_;
         }
+        // 竞争式仲裁（参数条 vs 动捕）：
+        //   动捕未运行      -> 完全由参数条驱动
+        //   动捕运行 + 拖动中 -> 被拖动的通道用手动值，其余跟动捕
+        //   动捕运行 + 未拖动 -> 全部跟动捕（松手即交还）
+        if (!running_) {
+            sem = manual_semantic_;
+        } else if (!manual_dragging_.isEmpty()) {
+            for (const QString& key : manual_dragging_) {
+                semantic_set(sem, key, semantic_get(manual_semantic_, key));
+            }
+        }
+        // 参数条显示的就是真正生效的值（节流到约 15Hz，别用 60Hz 刷 UI）
+        if (models_page_ && (++tick_counter_ % 4) == 0) push_param_values(sem);
         // 驱动屏幕外渲染宿主：set_semantics + update 会在 Qt 的 paintGL 中渲染一帧
         if (render_surface_) {
             render_surface_->set_semantics(sem);
@@ -403,6 +435,68 @@ void MainWindow::build_tray() {
 
     tray_->setContextMenu(tray_menu_);
     tray_->show();
+}
+
+// ---- 参数条：语义通道按 key 读写 ----
+// key 必须与 ModelsPage 里的通道表一致（两边各有一份，改动时要一起改）。
+double MainWindow::semantic_get(const lb::core::SemanticParams& s, const QString& key) {
+    if (key == QLatin1String("head.yaw")) return s.head.yaw;
+    if (key == QLatin1String("head.pitch")) return s.head.pitch;
+    if (key == QLatin1String("head.roll")) return s.head.roll;
+    if (key == QLatin1String("eye.open_left")) return s.eye.open_left;
+    if (key == QLatin1String("eye.open_right")) return s.eye.open_right;
+    if (key == QLatin1String("eye.brow_left")) return s.eye.brow_left;
+    if (key == QLatin1String("eye.brow_right")) return s.eye.brow_right;
+    if (key == QLatin1String("eye.look_x")) return s.eye.look_x;
+    if (key == QLatin1String("eye.look_y")) return s.eye.look_y;
+    if (key == QLatin1String("mouth.open")) return s.mouth.open;
+    if (key == QLatin1String("mouth.smile")) return s.mouth.smile;
+    if (key == QLatin1String("body.torso_sway")) return s.body.torso_sway;
+    if (key == QLatin1String("body.position_y")) return s.body.position_y;
+    if (key == QLatin1String("body.torso_tilt")) return s.body.torso_tilt;
+    if (key == QLatin1String("body.neck_pitch")) return s.body.neck_pitch;
+    if (key == QLatin1String("body.neck_yaw")) return s.body.neck_yaw;
+    if (key == QLatin1String("body.shoulder_shift")) return s.body.shoulder_shift;
+    return 0.0;
+}
+
+void MainWindow::semantic_set(lb::core::SemanticParams& s, const QString& key, double value) {
+    const float f = static_cast<float>(value);
+    if (key == QLatin1String("head.yaw")) { s.head.yaw = f; return; }
+    if (key == QLatin1String("head.pitch")) { s.head.pitch = f; return; }
+    if (key == QLatin1String("head.roll")) { s.head.roll = f; return; }
+    if (key == QLatin1String("eye.open_left")) { s.eye.open_left = f; return; }
+    if (key == QLatin1String("eye.open_right")) { s.eye.open_right = f; return; }
+    if (key == QLatin1String("eye.brow_left")) { s.eye.brow_left = f; return; }
+    if (key == QLatin1String("eye.brow_right")) { s.eye.brow_right = f; return; }
+    if (key == QLatin1String("eye.look_x")) { s.eye.look_x = f; return; }
+    if (key == QLatin1String("eye.look_y")) { s.eye.look_y = f; return; }
+    if (key == QLatin1String("mouth.open")) { s.mouth.open = f; return; }
+    if (key == QLatin1String("mouth.smile")) { s.mouth.smile = f; return; }
+    if (key == QLatin1String("body.torso_sway")) { s.body.torso_sway = f; return; }
+    if (key == QLatin1String("body.position_y")) { s.body.position_y = f; return; }
+    if (key == QLatin1String("body.torso_tilt")) { s.body.torso_tilt = f; return; }
+    if (key == QLatin1String("body.neck_pitch")) { s.body.neck_pitch = f; return; }
+    if (key == QLatin1String("body.neck_yaw")) { s.body.neck_yaw = f; return; }
+    if (key == QLatin1String("body.shoulder_shift")) { s.body.shoulder_shift = f; return; }
+}
+
+void MainWindow::push_param_values(const lb::core::SemanticParams& sem) {
+    if (!models_page_) return;
+    static const char* kKeys[] = {
+        "head.yaw",   "head.pitch",     "head.roll",
+        "eye.open_left", "eye.open_right", "eye.brow_left", "eye.brow_right",
+        "eye.look_x", "eye.look_y",     "mouth.open",    "mouth.smile",
+        "body.torso_sway", "body.position_y", "body.torso_tilt",
+        "body.neck_pitch", "body.neck_yaw", "body.shoulder_shift",
+    };
+    QVector<QPair<QString, double>> values;
+    values.reserve(static_cast<int>(sizeof(kKeys) / sizeof(kKeys[0])));
+    for (const char* k : kKeys) {
+        const QString key = QString::fromLatin1(k);
+        values.append(qMakePair(key, semantic_get(sem, key)));
+    }
+    models_page_->set_param_values(values);
 }
 
 void MainWindow::set_running(bool running) {

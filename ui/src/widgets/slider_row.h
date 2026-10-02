@@ -23,6 +23,9 @@ public:
 
 signals:
     void value_changed(double value);
+    // 用户开始/结束拖动滑杆。竞争式仲裁用它区分"人在操作"和"程序在刷新"：
+    // 只有拖动期间手动值优先，松手就交还给动捕。
+    void drag_state_changed(bool dragging);
 
 private:
     double to_value(int pos) const;

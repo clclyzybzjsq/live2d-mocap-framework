@@ -159,6 +159,13 @@ void FloatWindowWidget::paintEvent(QPaintEvent* event) {
     }
 }
 
+void FloatWindowWidget::showEvent(QShowEvent* event) {
+    QWidget::showEvent(event);
+    // hideEvent 会收起工具条，重新显示时必须恢复 —— 否则从输出页的「显示」
+    // 重新打开浮窗后工具条不再出现，拖动/穿透/关闭三个按钮就全没有入口了
+    sync_toolbar();
+}
+
 void FloatWindowWidget::mousePressEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && draggable_) {
         dragging_ = true;
@@ -271,7 +278,10 @@ FloatToolbar::FloatToolbar(FloatWindowWidget* host, QWidget* parent)
             [this]() { host_->set_drag_mode(!host_->drag_mode()); });
     connect(through_btn, &QPushButton::clicked, this,
             [this]() { host_->set_click_through(!host_->click_through()); });
-    connect(close_btn, &QPushButton::clicked, this, [this]() { host_->hide(); });
+    connect(close_btn, &QPushButton::clicked, this, [this]() {
+        emit host_->closed_by_user();
+        host_->hide();
+    });
 
     host_->connect(host_, &FloatWindowWidget::click_through_changed, this,
                    [set_active, through_btn](bool on) { set_active(through_btn, on); });

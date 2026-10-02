@@ -99,28 +99,40 @@ ModelsPage::ModelsPage(QWidget* parent) : QWidget(parent) {
         params_layout->addWidget(box);
     }
 
+    // 语义通道参数条。每一项都带一个 key，用于和 MainWindow 交换值（双向）。
+    // 量程按各自通道的实际含义给：角度是度，其余是归一化量。
+    struct Row {
+        QString key;
+        QString label;
+        double min;
+        double max;
+        double def;
+    };
     struct Group {
         QString title;
-        QVector<QPair<QString, double>> rows;
+        QVector<Row> rows;
     };
     const QVector<Group> groups = {
         { QStringLiteral("表情"),
-          { { QStringLiteral("眨眼左"), 1.0 },
-            { QStringLiteral("眨眼右"), 1.0 },
-            { QStringLiteral("眉毛左"), 0.0 },
-            { QStringLiteral("眉毛右"), 0.0 },
-            { QStringLiteral("嘴开合"), 0.0 },
-            { QStringLiteral("微笑"), 0.0 } } },
+          { { QStringLiteral("eye.open_left"), QStringLiteral("眨眼左"), 0.0, 1.0, 1.0 },
+            { QStringLiteral("eye.open_right"), QStringLiteral("眨眼右"), 0.0, 1.0, 1.0 },
+            { QStringLiteral("eye.brow_left"), QStringLiteral("眉毛左"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("eye.brow_right"), QStringLiteral("眉毛右"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("eye.look_x"), QStringLiteral("视线左右"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("eye.look_y"), QStringLiteral("视线上下"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("mouth.open"), QStringLiteral("嘴开合"), 0.0, 1.0, 0.0 },
+            { QStringLiteral("mouth.smile"), QStringLiteral("微笑"), -1.0, 1.0, 0.0 } } },
         { QStringLiteral("头部"),
-          { { QStringLiteral("左右偏转"), 0.0 },
-            { QStringLiteral("上下俯仰"), 0.0 },
-            { QStringLiteral("倾斜"), 0.0 } } },
+          { { QStringLiteral("head.yaw"), QStringLiteral("左右偏转"), -30.0, 30.0, 0.0 },
+            { QStringLiteral("head.pitch"), QStringLiteral("上下俯仰"), -30.0, 30.0, 0.0 },
+            { QStringLiteral("head.roll"), QStringLiteral("倾斜"), -30.0, 30.0, 0.0 } } },
         { QStringLiteral("身体"),
-          { { QStringLiteral("躯干前倾"), 0.0 },
-            { QStringLiteral("躯干侧倾"), 0.0 },
-            { QStringLiteral("颈部俯仰"), 0.0 },
-            { QStringLiteral("颈部偏转"), 0.0 },
-            { QStringLiteral("肩膀起伏"), 0.0 } } },
+          { { QStringLiteral("body.torso_sway"), QStringLiteral("左右摇摆"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("body.position_y"), QStringLiteral("上下平动"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("body.torso_tilt"), QStringLiteral("躯干前倾"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("body.neck_pitch"), QStringLiteral("颈部俯仰"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("body.neck_yaw"), QStringLiteral("颈部偏转"), -1.0, 1.0, 0.0 },
+            { QStringLiteral("body.shoulder_shift"), QStringLiteral("肩膀平移"), -1.0, 1.0, 0.0 } } },
     };
 
     for (const auto& group : groups) {
@@ -129,13 +141,21 @@ ModelsPage::ModelsPage(QWidget* parent) : QWidget(parent) {
         box_layout->setContentsMargins(10, 14, 10, 8);
         box_layout->setSpacing(4);
         for (const auto& row : group.rows) {
-            box_layout->addWidget(new SliderRow(row.first, 0.0, 1.0, row.second, box));
+            auto* slider = new SliderRow(row.label, row.min, row.max, row.def, box);
+            param_rows_.insert(row.key, slider);
+            const QString key = row.key;
+            connect(slider, &SliderRow::value_changed, this,
+                    [this, key](double v) { emit param_edited(key, v); });
+            connect(slider, &SliderRow::drag_state_changed, this,
+                    [this, key](bool dragging) { emit param_drag_state(key, dragging); });
+            box_layout->addWidget(slider);
         }
         params_layout->addWidget(box);
     }
 
     auto* hint = new QLabel(
-        QStringLiteral("参数面板由动捕实时驱动；此处为手动查看用"), host);
+        QStringLiteral("拖动参数条时以手动值为准；松手后交还给动捕；动捕未运行时完全由参数条驱动"),
+        host);
     hint->setObjectName("HintText");
     params_layout->addWidget(hint);
     params_layout->addStretch(1);
@@ -173,6 +193,16 @@ void ModelsPage::set_expressions(const QStringList& names) {
     expression_combo_->setCurrentIndex(0);
     expression_combo_->setEnabled(expression_combo_->count() > 1);
     updating_expressions_ = false;
+}
+
+void ModelsPage::set_param_values(const QVector<QPair<QString, double>>& values) {
+    for (const auto& kv : values) {
+        if (SliderRow* row = param_rows_.value(kv.first)) {
+            // 程序刷新不能回发 param_edited，否则会把手动值又"确认"成用户输入
+            const QSignalBlocker blocker(row);
+            row->set_value(kv.second);
+        }
+    }
 }
 
 void ModelsPage::choose_folder() {

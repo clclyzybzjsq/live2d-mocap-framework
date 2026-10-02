@@ -55,9 +55,12 @@ public:
 signals:
     void click_through_changed(bool enabled);
     void drag_mode_changed(bool on);
+    // 用户从工具条点了「关闭」（区别于程序内隐藏，用于同步输出页的开关状态）
+    void closed_by_user();
 
 protected:
     void paintEvent(QPaintEvent* event) override;
+    void showEvent(QShowEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;

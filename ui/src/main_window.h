@@ -5,6 +5,8 @@
 #include "render/live2d_model_library.h"
 
 #include <QMainWindow>
+#include <QSet>
+#include <QString>
 
 #include <memory>
 #include <mutex>
@@ -61,6 +63,12 @@ private:
     // 模型页选中模型 -> 重建形象渲染器（浮窗与虚拟摄像头共用）
     void on_model_activated(const QString& model_json);
 
+    // 语义通道按 key 读写（参数条用；key 与 ModelsPage 的通道表一一对应）
+    static double semantic_get(const lb::core::SemanticParams& s, const QString& key);
+    static void semantic_set(lb::core::SemanticParams& s, const QString& key, double value);
+    // 把当前生效的通道值刷到参数条上
+    void push_param_values(const lb::core::SemanticParams& sem);
+
     // 顶栏
     QLabel* status_dot_ = nullptr;
     QLabel* status_text_ = nullptr;
@@ -96,6 +104,12 @@ private:
     // （Qt Widgets 应用里自建离屏上下文渲染不出内容，见 cubism_render_surface.h）
     CubismRenderSurface* render_surface_ = nullptr;
     Live2dModelInfo current_model_;
+
+    // 参数条的手动值，竞争式仲裁用：拖动中的通道优先用手动值；
+    // 动捕未运行时全部通道都用手动值。
+    lb::core::SemanticParams manual_semantic_;
+    QSet<QString> manual_dragging_;
+    int tick_counter_ = 0;
     // Cubism 渲染需要 GL 上下文，只能在 UI 线程驱动
     QTimer* avatar_timer_ = nullptr;
     std::mutex semantic_mutex_;

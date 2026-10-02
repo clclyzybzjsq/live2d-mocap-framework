@@ -59,6 +59,8 @@ SliderRow::SliderRow(const QString& title, double min, double max, double value,
         emit value_changed(dv);
     });
     connect(reset, &QPushButton::clicked, this, [this]() { set_value(default_); });
+    connect(slider_, &QSlider::sliderPressed, this, [this]() { emit drag_state_changed(true); });
+    connect(slider_, &QSlider::sliderReleased, this, [this]() { emit drag_state_changed(false); });
 }
 
 double SliderRow::to_value(int pos) const {

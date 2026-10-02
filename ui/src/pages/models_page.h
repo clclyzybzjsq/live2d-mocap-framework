@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QString>
 #include <QWidget>
 
@@ -13,6 +14,8 @@ class QListWidget;
 class QVBoxLayout;
 
 namespace lb::ui {
+
+class SliderRow;
 
 // 模型页：左侧模型列表（扫描模型目录得到），右侧分组参数面板。
 // 模型目录与当前选择通过 QSettings 记忆；目录可用环境变量 LB_MODELS_DIR 指定默认值。
@@ -28,6 +31,8 @@ public:
     QString current_model_json() const { return selected_json_; }
     // 模型自带的表达式列表（exp_xxx），首项由页面自行补「无表情」
     void set_expressions(const QStringList& names);
+    // 把当前的通道值刷到参数条上（程序刷新，不回发信号）
+    void set_param_values(const QVector<QPair<QString, double>>& values);
 
 signals:
     void model_changed(const QString& name);
@@ -35,6 +40,10 @@ signals:
     void model_activated(const QString& model_json);
     // 表情切换（-1 表示无表情）
     void expression_changed(int index);
+    // 参数条被拖动/松开的通道（竞争式仲裁用）
+    void param_drag_state(const QString& key, bool dragging);
+    // 参数条的值被用户改动
+    void param_edited(const QString& key, double value);
 
 private:
     void choose_folder();
@@ -46,6 +55,7 @@ private:
     QLabel* status_label_ = nullptr;
     QComboBox* expression_combo_ = nullptr;
     bool updating_expressions_ = false;
+    QHash<QString, SliderRow*> param_rows_; // 语义通道 key -> 参数条
     QString model_dir_;
     QString selected_json_;
     std::vector<Live2dModelInfo> models_;
