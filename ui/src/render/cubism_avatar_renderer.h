@@ -57,8 +57,10 @@ public:
     void set_view(float zoom, float offset_x, float offset_y);
     // 动作幅度：头颈/躯干转动量的整体倍率（1.0 为原始幅度）
     void set_motion_gain(float g);
-    // 表情幅度：眼睛开合/眉毛/嘴部表情的整体倍率（1.0 为原始幅度）
-    void set_face_gain(float g);
+    // 眼部幅度：眼睛开合 + 眉毛的倍率（1.0 为原始幅度）
+    void set_eye_gain(float g);
+    // 口部幅度：嘴开合/微笑/抿嘴的倍率（1.0 为原始幅度）
+    void set_mouth_gain(float g);
 
     // ---- 表情（模型自带的 exp_xxx）----
     // 切换当前表情；index < 0 表示无表情。表情是一组参数覆盖，
@@ -98,7 +100,8 @@ private:
     float offset_x_ = 0.0f;
     float offset_y_ = -0.5f;
     float motion_gain_ = 1.0f;
-    float face_gain_ = 1.5f;
+    float eye_gain_ = 0.96f;
+    float mouth_gain_ = 0.96f;
     float time_seconds_ = 0.0f;
     bool gl_ready_ = false;
     bool ready_ = false;

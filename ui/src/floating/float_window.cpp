@@ -41,7 +41,6 @@ FloatWindowWidget::FloatWindowWidget(QWidget* parent) : QWidget(parent) {
     toolbar_ = new FloatToolbar(this);
     toolbar_->hide();
 
-    apply_mouse_transparency();
     load_geometry();
 }
 
@@ -61,22 +60,26 @@ void FloatWindowWidget::set_frame(const FrameSnapshot& snap) {
 }
 
 void FloatWindowWidget::set_click_through(bool enabled) {
+    if (click_through_ == enabled) return;
     click_through_ = enabled;
-    apply_mouse_transparency();
+
+    // 顶层窗口的点击穿透必须用窗口标志 WindowTransparentForInput。
+    // WA_TransparentForMouseEvents 是"控件级"属性，对无边框顶层窗口在 Windows 上
+    // 不生效：事件照样送到本窗口，表现就是"已经切到穿透了却还能拖动"。
+    const QPoint keep_pos = pos();
+    const bool was_visible = isVisible();
+    setWindowFlag(Qt::WindowTransparentForInput, enabled);
+    // 控件级属性也一起设上（双保险，且能拦住子控件的命中测试）
+    setAttribute(Qt::WA_TransparentForMouseEvents, enabled);
+    if (enabled) dragging_ = false; // 进入穿透时清掉可能残留的拖动状态
+
+    if (was_visible) {
+        // setWindowFlag 会重建原生窗口，需要重新显示并恢复位置
+        show();
+        move(keep_pos);
+    }
     sync_toolbar();
     emit click_through_changed(enabled);
-}
-
-void FloatWindowWidget::set_drag_mode(bool on) {
-    if (drag_mode_ == on) return;
-    drag_mode_ = on;
-    apply_mouse_transparency();
-    emit drag_mode_changed(on);
-}
-
-void FloatWindowWidget::apply_mouse_transparency() {
-    // 拖动模式优先：穿透开着也要能拖，否则浮窗一旦设成穿透就再也移不动
-    setAttribute(Qt::WA_TransparentForMouseEvents, click_through_ && !drag_mode_);
 }
 
 void FloatWindowWidget::set_scale(double scale) {
@@ -274,21 +277,28 @@ FloatToolbar::FloatToolbar(FloatWindowWidget* host, QWidget* parent)
                                 "QPushButton:hover { color: #E8EAED; }"));
     };
 
+    // 工具条上的「拖动 / 穿透」是互斥的两态，都只反映 click_through 这一个状态：
+    //   拖动 -> 关掉穿透（窗口收鼠标事件，可拖动）
+    //   穿透 -> 打开穿透（点击穿到背后的窗口）
+    // 之前做成两个独立开关，两个都亮时窗口仍可拖，看起来就是"永远在拖动状态"。
     connect(drag_btn, &QPushButton::clicked, this,
-            [this]() { host_->set_drag_mode(!host_->drag_mode()); });
+            [this]() { host_->set_click_through(false); });
     connect(through_btn, &QPushButton::clicked, this,
-            [this]() { host_->set_click_through(!host_->click_through()); });
+            [this]() { host_->set_click_through(true); });
     connect(close_btn, &QPushButton::clicked, this, [this]() {
         emit host_->closed_by_user();
         host_->hide();
     });
 
     host_->connect(host_, &FloatWindowWidget::click_through_changed, this,
-                   [set_active, through_btn](bool on) { set_active(through_btn, on); });
-    host_->connect(host_, &FloatWindowWidget::drag_mode_changed, this,
-                   [set_active, drag_btn](bool on) { set_active(drag_btn, on); });
+                   [set_active, drag_btn, through_btn](bool through) {
+                       set_active(through_btn, through);
+                       set_active(drag_btn, !through);
+                   });
     through_btn->setCheckable(true);
     drag_btn->setCheckable(true);
+    set_active(drag_btn, !host_->click_through());
+    set_active(through_btn, host_->click_through());
     reposition();
 }
 

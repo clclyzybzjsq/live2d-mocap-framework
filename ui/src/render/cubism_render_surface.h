@@ -46,8 +46,10 @@ public:
     void set_view(float zoom, float offset_x, float offset_y);
     // 动作幅度（头颈/躯干转动量倍率）
     void set_motion_gain(float g);
-    // 表情幅度（眼睛开合/眉毛/嘴部表情的倍率）
-    void set_face_gain(float g);
+    // 眼部幅度（眼睛开合 + 眉毛的倍率）
+    void set_eye_gain(float g);
+    // 口部幅度（嘴开合/微笑/抿嘴的倍率）
+    void set_mouth_gain(float g);
     // 模型自带表情（exp_xxx）：index < 0 表示无表情
     void set_expression(int index);
     std::vector<QString> expression_names() const;

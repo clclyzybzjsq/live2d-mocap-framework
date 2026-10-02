@@ -616,24 +616,28 @@ void CubismAvatarRenderer::apply_params(const lb::core::SemanticParams& sem) {
         s.body.neck_yaw *= motion_gain_;
         s.body.shoulder_shift *= motion_gain_;
     }
-    // 表情幅度。摄像头算出的表情系数普遍偏小：自然闭眼时 eyeBlink 只到
-    // 0.7~0.9、说话时 jawOpen 通常只有 0.3~0.5，直接映射就会"眼睛闭不严、
-    // 张嘴不明显、要瞪大眼才满格"。
+    // 表情幅度（眼部/口部分开）。摄像头算出的表情系数普遍偏小：自然闭眼时
+    // eyeBlink 只到 0.7~0.9、说话时 jawOpen 通常只有 0.3~0.5，直接映射就会
+    // "眼睛闭不严、张嘴不明显、要瞪大眼才满格"。
     //
     // 关键：增益要作用在"变化量"上而不是原值上。对眼睛开合度直接乘增益
     // 会让眼睛更睁大（方向正好相反），所以这里放大的是"闭合量" (1-open)。
+    // 眉毛归入眼部（它和眼睛一起构成上半脸表情）。
     // 视线不参与：它是"看哪里"，放大后容易一直贴着边缘。
-    if (face_gain_ != 1.0f) {
-        const float g = face_gain_;
-        const auto amp01 = [g](float v) { return std::clamp(v * g, 0.0f, 1.0f); };
-        const auto amp11 = [g](float v) { return std::clamp(v * g, -1.0f, 1.0f); };
-        s.eye.open_left = 1.0f - amp01(1.0f - s.eye.open_left);
-        s.eye.open_right = 1.0f - amp01(1.0f - s.eye.open_right);
-        s.eye.brow_left = amp11(s.eye.brow_left);
-        s.eye.brow_right = amp11(s.eye.brow_right);
-        s.mouth.open = amp01(s.mouth.open);
-        s.mouth.smile = amp11(s.mouth.smile);
-        s.mouth.press = amp01(s.mouth.press);
+    {
+        const auto amp01 = [](float v, float g) { return std::clamp(v * g, 0.0f, 1.0f); };
+        const auto amp11 = [](float v, float g) { return std::clamp(v * g, -1.0f, 1.0f); };
+        if (eye_gain_ != 1.0f) {
+            s.eye.open_left = 1.0f - amp01(1.0f - s.eye.open_left, eye_gain_);
+            s.eye.open_right = 1.0f - amp01(1.0f - s.eye.open_right, eye_gain_);
+            s.eye.brow_left = amp11(s.eye.brow_left, eye_gain_);
+            s.eye.brow_right = amp11(s.eye.brow_right, eye_gain_);
+        }
+        if (mouth_gain_ != 1.0f) {
+            s.mouth.open = amp01(s.mouth.open, mouth_gain_);
+            s.mouth.smile = amp11(s.mouth.smile, mouth_gain_);
+            s.mouth.press = amp01(s.mouth.press, mouth_gain_);
+        }
     }
 
     core::CubismParamValue values[core::kCubismParamMax];
@@ -814,9 +818,14 @@ void CubismAvatarRenderer::set_motion_gain(float g) {
     cubism_log("[view] 动作幅度=%.2f\n", motion_gain_);
 }
 
-void CubismAvatarRenderer::set_face_gain(float g) {
-    face_gain_ = (g > 0.0f) ? g : 1.0f;
-    cubism_log("[view] 表情幅度=%.2f\n", face_gain_);
+void CubismAvatarRenderer::set_eye_gain(float g) {
+    eye_gain_ = (g > 0.0f) ? g : 1.0f;
+    cubism_log("[view] 眼部幅度=%.2f\n", eye_gain_);
+}
+
+void CubismAvatarRenderer::set_mouth_gain(float g) {
+    mouth_gain_ = (g > 0.0f) ? g : 1.0f;
+    cubism_log("[view] 口部幅度=%.2f\n", mouth_gain_);
 }
 
 } // namespace lb::ui

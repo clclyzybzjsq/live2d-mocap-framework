@@ -57,8 +57,12 @@ void CubismRenderSurface::set_motion_gain(float g) {
     if (renderer_) renderer_->set_motion_gain(g);
 }
 
-void CubismRenderSurface::set_face_gain(float g) {
-    if (renderer_) renderer_->set_face_gain(g);
+void CubismRenderSurface::set_eye_gain(float g) {
+    if (renderer_) renderer_->set_eye_gain(g);
+}
+
+void CubismRenderSurface::set_mouth_gain(float g) {
+    if (renderer_) renderer_->set_mouth_gain(g);
 }
 
 void CubismRenderSurface::set_expression(int index) {

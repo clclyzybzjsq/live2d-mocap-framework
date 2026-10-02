@@ -46,15 +46,9 @@ public:
     void set_avatar_renderer(AvatarRenderer* r);
 
     bool click_through() const { return click_through_; }
-    // 拖动模式：临时挂起穿透，让窗口能接收鼠标事件从而被拖动。
-    // 穿透开启时窗口设了 WA_TransparentForMouseEvents，收不到任何鼠标事件，
-    // 没有这个开关就完全没法移动浮窗。
-    bool drag_mode() const { return drag_mode_; }
-    void set_drag_mode(bool on);
 
 signals:
     void click_through_changed(bool enabled);
-    void drag_mode_changed(bool on);
     // 用户从工具条点了「关闭」（区别于程序内隐藏，用于同步输出页的开关状态）
     void closed_by_user();
 
@@ -73,8 +67,6 @@ private:
     void save_geometry();
     void load_geometry();
     void apply_size();
-    // 鼠标穿透的实际生效开关：穿透开启时仍要能拖动，故取两者的组合
-    void apply_mouse_transparency();
 
     std::mutex mutex_;
     lb::core::SemanticParams semantic_;
@@ -86,8 +78,10 @@ private:
     QPoint drag_offset_;
     bool dragging_ = false;
     bool draggable_ = true;
+    // 鼠标穿透。工具条上的「拖动 / 穿透」是互斥的两态，都由这一个状态决定：
+    //   不穿透 = 拖动模式（窗口收鼠标事件）
+    //   穿透   = 点击穿透（WA_TransparentForMouseEvents）
     bool click_through_ = false;
-    bool drag_mode_ = false;
     double scale_ = 1.0;
     // 整体缩放倍率：窗口尺寸与窗内画面同倍率放大（画面相对窗口还会再放大一档，
     // 因此模型在浮窗里占的比例也随之变大，而不是留出更多空白）

@@ -85,9 +85,15 @@ MocapPage::MocapPage(QWidget* parent) : QWidget(parent) {
     // 表情幅度：眼睛开合/眉毛/嘴部表情的整体倍率。
     // 表情系数普遍偏小（自然闭眼只到 0.7~0.9、说话时 jawOpen 只有 0.3~0.5），
     // 默认给 1.5 让闭眼能闭严、说话时嘴部动作明显。
-    face_gain_ = new SliderRow(QStringLiteral("表情幅度"), 0.5, 3.0, 0.96, form);
-    connect(face_gain_, &SliderRow::value_changed, this, &MocapPage::face_gain_changed);
-    form_layout->addRow(QStringLiteral("参数"), face_gain_);
+    // 眼部/口部幅度分开调：两者需要的放大倍数往往不同
+    //（表情系数普遍偏小：自然闭眼只到 0.7~0.9、说话时 jawOpen 只有 0.3~0.5）
+    eye_gain_ = new SliderRow(QStringLiteral("眼部幅度"), 0.5, 3.0, 0.96, form);
+    connect(eye_gain_, &SliderRow::value_changed, this, &MocapPage::eye_gain_changed);
+    form_layout->addRow(QStringLiteral("参数"), eye_gain_);
+
+    mouth_gain_ = new SliderRow(QStringLiteral("口部幅度"), 0.5, 3.0, 0.96, form);
+    connect(mouth_gain_, &SliderRow::value_changed, this, &MocapPage::mouth_gain_changed);
+    form_layout->addRow(QStringLiteral("参数"), mouth_gain_);
 
     // 置信度
     confidence_bar_ = new QProgressBar(form);
@@ -166,12 +172,20 @@ void MocapPage::set_smoothing(double s) {
     if (smoothing_) smoothing_->set_value(s);
 }
 
-double MocapPage::face_gain() const {
-    return face_gain_ ? face_gain_->value() : 0.96;
+double MocapPage::eye_gain() const {
+    return eye_gain_ ? eye_gain_->value() : 0.96;
 }
 
-void MocapPage::set_face_gain(double g) {
-    if (face_gain_) face_gain_->set_value(g);
+void MocapPage::set_eye_gain(double g) {
+    if (eye_gain_) eye_gain_->set_value(g);
+}
+
+double MocapPage::mouth_gain() const {
+    return mouth_gain_ ? mouth_gain_->value() : 0.96;
+}
+
+void MocapPage::set_mouth_gain(double g) {
+    if (mouth_gain_) mouth_gain_->set_value(g);
 }
 
 void MocapPage::set_mirror(bool enabled) {

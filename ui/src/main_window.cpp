@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <cstring>
 #include <QDebug>
+#include "render/cubism_runtime.h" // cubism_log
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -175,16 +176,27 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         settings.setValue(QStringLiteral("mocap/smoothing"), value);
     });
 
-    // 表情幅度：恢复上次设置，并在变化时应用到渲染器
+    // 眼部/口部幅度：恢复上次设置，并在变化时应用到渲染器。
+    // 旧的单一「表情幅度」设置（mocap/face_gain）作为两者的迁移初值，
+    // 这样老配置升上来不会突然变成别的数值。
     {
         QSettings settings;
-        mocap_page_->set_face_gain(
-            settings.value(QStringLiteral("mocap/face_gain"), mocap_page_->face_gain()).toDouble());
+        const double legacy =
+            settings.value(QStringLiteral("mocap/face_gain"), mocap_page_->eye_gain()).toDouble();
+        mocap_page_->set_eye_gain(
+            settings.value(QStringLiteral("mocap/eye_gain"), legacy).toDouble());
+        mocap_page_->set_mouth_gain(
+            settings.value(QStringLiteral("mocap/mouth_gain"), legacy).toDouble());
     }
-    connect(mocap_page_, &MocapPage::face_gain_changed, this, [this](double gain) {
-        if (render_surface_) render_surface_->set_face_gain(static_cast<float>(gain));
+    connect(mocap_page_, &MocapPage::eye_gain_changed, this, [this](double gain) {
+        if (render_surface_) render_surface_->set_eye_gain(static_cast<float>(gain));
         QSettings settings;
-        settings.setValue(QStringLiteral("mocap/face_gain"), gain);
+        settings.setValue(QStringLiteral("mocap/eye_gain"), gain);
+    });
+    connect(mocap_page_, &MocapPage::mouth_gain_changed, this, [this](double gain) {
+        if (render_surface_) render_surface_->set_mouth_gain(static_cast<float>(gain));
+        QSettings settings;
+        settings.setValue(QStringLiteral("mocap/mouth_gain"), gain);
     });
 
     // 镜像：采集端翻转（位于推理之前，转头方向会一起镜像）。
@@ -247,7 +259,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
                 render_surface_->set_view(output_page_->view_zoom(), output_page_->view_offset_x(),
                                           output_page_->view_offset_y());
                 render_surface_->set_motion_gain(static_cast<float>(mocap_page_->motion_gain()));
-                render_surface_->set_face_gain(static_cast<float>(mocap_page_->face_gain()));
+                render_surface_->set_eye_gain(static_cast<float>(mocap_page_->eye_gain()));
+                render_surface_->set_mouth_gain(static_cast<float>(mocap_page_->mouth_gain()));
+                // 表情列表由模型决定，加载完成后才拿得到；换模型会重新填充。
+                // 注意：这一步必须在 renderer 就绪之后，initializeGL 时还没有模型，
+                // 拿到的会是空列表。
+                if (models_page_) {
+                    QStringList exprs;
+                    for (const QString& n : render_surface_->expression_names()) exprs << n;
+                    models_page_->set_expressions(exprs);
+                    cubism_log("[ui] 表情列表填入 %d 项\n", static_cast<int>(exprs.size()));
+                }
             }
             status_model_->setText(
                 ok ? QStringLiteral("模型: %1（Cubism）").arg(current_model_.name)

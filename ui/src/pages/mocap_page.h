@@ -29,16 +29,20 @@ public:
     // 平滑强度（0 接近原样透传，越大越平滑）
     double smoothing() const;
     void set_smoothing(double s);
-    // 表情幅度（眼睛开合/眉毛/嘴部表情倍率，1.0 为原始幅度）
-    double face_gain() const;
-    void set_face_gain(double g);
+    // 眼部幅度（眼睛开合 + 眉毛倍率，1.0 为原始幅度）
+    double eye_gain() const;
+    void set_eye_gain(double g);
+    // 口部幅度（嘴开合/微笑/抿嘴倍率，1.0 为原始幅度）
+    double mouth_gain() const;
+    void set_mouth_gain(double g);
     // 镜像（采集端水平翻转）
     void set_mirror(bool enabled);
 
 signals:
     void motion_gain_changed(double gain);
     void smoothing_changed(double smoothing);
-    void face_gain_changed(double gain);
+    void eye_gain_changed(double gain);
+    void mouth_gain_changed(double gain);
     void mirror_changed(bool enabled);
     // 请求按当前配置重启动捕（摄像头/分辨率/帧率只在启动时下发）
     void apply_requested();
@@ -55,7 +59,8 @@ private:
     ToggleSwitch* mirror_switch_ = nullptr;
     SliderRow* motion_gain_ = nullptr;
     SliderRow* smoothing_ = nullptr;
-    SliderRow* face_gain_ = nullptr;
+    SliderRow* eye_gain_ = nullptr;
+    SliderRow* mouth_gain_ = nullptr;
     QProgressBar* confidence_bar_ = nullptr;
     QLabel* status_label_ = nullptr;
 };
