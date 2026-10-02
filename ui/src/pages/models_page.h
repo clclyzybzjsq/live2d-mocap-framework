@@ -7,6 +7,7 @@
 
 #include "render/live2d_model_library.h"
 
+class QComboBox;
 class QLabel;
 class QListWidget;
 class QVBoxLayout;
@@ -25,11 +26,15 @@ public:
     QString model_dir() const { return model_dir_; }
     // 当前选中模型的 .model3.json 路径（未选中时为空）
     QString current_model_json() const { return selected_json_; }
+    // 模型自带的表达式列表（exp_xxx），首项由页面自行补「无表情」
+    void set_expressions(const QStringList& names);
 
 signals:
     void model_changed(const QString& name);
     // 选中了可用模型（携带 .model3.json 绝对路径）
     void model_activated(const QString& model_json);
+    // 表情切换（-1 表示无表情）
+    void expression_changed(int index);
 
 private:
     void choose_folder();
@@ -39,6 +44,8 @@ private:
     QListWidget* model_list_ = nullptr;
     QLabel* dir_label_ = nullptr;
     QLabel* status_label_ = nullptr;
+    QComboBox* expression_combo_ = nullptr;
+    bool updating_expressions_ = false;
     QString model_dir_;
     QString selected_json_;
     std::vector<Live2dModelInfo> models_;

@@ -1,5 +1,6 @@
 #include "models_page.h"
 
+#include <QComboBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGroupBox>
@@ -77,6 +78,27 @@ ModelsPage::ModelsPage(QWidget* parent) : QWidget(parent) {
     ptitle->setObjectName("PageTitle");
     params_layout->addWidget(ptitle);
 
+    // ---- 表情：模型自带的 exp_xxx，可在动捕过程中随时切换 ----
+    {
+        auto* box = new QGroupBox(QStringLiteral("表情"), host);
+        auto* box_layout = new QVBoxLayout(box);
+        box_layout->setContentsMargins(10, 14, 10, 8);
+        box_layout->setSpacing(4);
+
+        expression_combo_ = new QComboBox(box);
+        expression_combo_->addItem(QStringLiteral("无表情"));
+        connect(expression_combo_, &QComboBox::currentIndexChanged, this, [this](int idx) {
+            if (!updating_expressions_) emit expression_changed(idx - 1); // 0 -> 无表情(-1)
+        });
+        box_layout->addWidget(expression_combo_);
+
+        auto* exp_hint = new QLabel(
+            QStringLiteral("切换后立即生效；表情会覆盖它自己包含的那几个参数"), box);
+        exp_hint->setObjectName("HintText");
+        box_layout->addWidget(exp_hint);
+        params_layout->addWidget(box);
+    }
+
     struct Group {
         QString title;
         QVector<QPair<QString, double>> rows;
@@ -139,6 +161,18 @@ ModelsPage::ModelsPage(QWidget* parent) : QWidget(parent) {
     }
 
     connect(model_list_, &QListWidget::currentRowChanged, this, &ModelsPage::on_row_activated);
+}
+
+void ModelsPage::set_expressions(const QStringList& names) {
+    if (!expression_combo_) return;
+    // 重建列表时不回发信号（否则会把"无表情"当成用户选择发给渲染器）
+    updating_expressions_ = true;
+    expression_combo_->clear();
+    expression_combo_->addItem(QStringLiteral("无表情"));
+    for (const QString& n : names) expression_combo_->addItem(n);
+    expression_combo_->setCurrentIndex(0);
+    expression_combo_->setEnabled(expression_combo_->count() > 1);
+    updating_expressions_ = false;
 }
 
 void ModelsPage::choose_folder() {

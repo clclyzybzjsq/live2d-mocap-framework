@@ -208,6 +208,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         set_running(true);
     });
 
+    // 表情：模型自带的 exp_xxx，切换后立即生效（渲染器会在下一帧之前施加）
+    connect(models_page_, &ModelsPage::expression_changed, this, [this](int index) {
+        if (render_surface_) render_surface_->set_expression(index);
+    });
+
     // 形象渲染：用一个移到屏幕外的 QOpenGLWidget 作为渲染宿主。
     // Qt Widgets 应用里自建的离屏 GL 上下文渲染不出内容（全透明），
     // 而 QOpenGLWidget 提供的上下文可以正常工作。

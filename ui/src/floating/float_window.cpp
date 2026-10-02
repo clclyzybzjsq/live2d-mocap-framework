@@ -41,6 +41,7 @@ FloatWindowWidget::FloatWindowWidget(QWidget* parent) : QWidget(parent) {
     toolbar_ = new FloatToolbar(this);
     toolbar_->hide();
 
+    apply_mouse_transparency();
     load_geometry();
 }
 
@@ -61,9 +62,21 @@ void FloatWindowWidget::set_frame(const FrameSnapshot& snap) {
 
 void FloatWindowWidget::set_click_through(bool enabled) {
     click_through_ = enabled;
-    setAttribute(Qt::WA_TransparentForMouseEvents, enabled);
+    apply_mouse_transparency();
     sync_toolbar();
     emit click_through_changed(enabled);
+}
+
+void FloatWindowWidget::set_drag_mode(bool on) {
+    if (drag_mode_ == on) return;
+    drag_mode_ = on;
+    apply_mouse_transparency();
+    emit drag_mode_changed(on);
+}
+
+void FloatWindowWidget::apply_mouse_transparency() {
+    // 拖动模式优先：穿透开着也要能拖，否则浮窗一旦设成穿透就再也移不动
+    setAttribute(Qt::WA_TransparentForMouseEvents, click_through_ && !drag_mode_);
 }
 
 void FloatWindowWidget::set_scale(double scale) {
@@ -242,26 +255,30 @@ FloatToolbar::FloatToolbar(FloatWindowWidget* host, QWidget* parent)
     outer->setContentsMargins(0, 0, 0, 0);
     outer->addWidget(panel);
 
-    connect(drag_btn, &QPushButton::clicked, this, [this]() {
-        // 由 host 拖动处理；此处仅占位（M1 默认即可拖动）。
-    });
-    connect(through_btn, &QPushButton::clicked, this, [this]() {
-        host_->set_click_through(!host_->click_through());
-    });
+    // 激活态样式统一处理，避免每个按钮各写一遍
+    const auto set_active = [](QPushButton* b, bool on) {
+        b->setChecked(on);
+        b->setStyleSheet(
+            on ? QStringLiteral("QPushButton { background: transparent; border: none;"
+                                " color: #4DB8FF; font-size: 11px; padding: 0 6px; }"
+                                "QPushButton:hover { color: #E8EAED; }")
+               : QStringLiteral("QPushButton { background: transparent; border: none;"
+                                " color: #9BA1A8; font-size: 11px; padding: 0 6px; }"
+                                "QPushButton:hover { color: #E8EAED; }"));
+    };
+
+    connect(drag_btn, &QPushButton::clicked, this,
+            [this]() { host_->set_drag_mode(!host_->drag_mode()); });
+    connect(through_btn, &QPushButton::clicked, this,
+            [this]() { host_->set_click_through(!host_->click_through()); });
     connect(close_btn, &QPushButton::clicked, this, [this]() { host_->hide(); });
 
     host_->connect(host_, &FloatWindowWidget::click_through_changed, this,
-                   [through_btn](bool on) {
-                       through_btn->setChecked(on);
-                       through_btn->setStyleSheet(on
-                           ? QStringLiteral("QPushButton { background: transparent;"
-                                            " border: none; color: #4DB8FF;"
-                                            " font-size: 11px; padding: 0 6px; }")
-                           : QStringLiteral("QPushButton { background: transparent;"
-                                            " border: none; color: #9BA1A8;"
-                                            " font-size: 11px; padding: 0 6px; }"));
-                   });
+                   [set_active, through_btn](bool on) { set_active(through_btn, on); });
+    host_->connect(host_, &FloatWindowWidget::drag_mode_changed, this,
+                   [set_active, drag_btn](bool on) { set_active(drag_btn, on); });
     through_btn->setCheckable(true);
+    drag_btn->setCheckable(true);
     reposition();
 }
 

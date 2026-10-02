@@ -13,6 +13,7 @@
 #include <QSurfaceFormat>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +26,8 @@
 #include "Math/CubismModelMatrix.hpp"
 #include "Model/CubismModel.hpp"
 #include "Model/CubismUserModel.hpp"
+#include "Motion/CubismExpressionMotion.hpp"
+#include "Motion/CubismExpressionMotionManager.hpp"
 #include "Rendering/OpenGL/CubismOffscreenManager_OpenGLES2.hpp"
 #include "Rendering/OpenGL/CubismRenderer_OpenGLES2.hpp"
 
@@ -37,6 +40,14 @@ namespace lb::ui {
 // ---- 模型运行时：加载 moc3/纹理 + 应用参数 + 绘制 ----
 class CubismModelRuntime final : public CubismUserModel {
 public:
+    ~CubismModelRuntime() override {
+        // 表情 motion 是 autoDelete=false 提交给队列的，队列不会释放它们
+        for (ExpressionEntry& e : expressions_) {
+            if (e.motion) ACubismMotion::Delete(e.motion);
+        }
+        expressions_.clear();
+    }
+
     bool load(const std::string& model_json, int w, int h) {
         cubism_log("[cubism] 载入模型: %s\n", model_json.c_str());
         const size_t slash = model_json.find_last_of("/\\");
@@ -55,6 +66,27 @@ public:
         log_param_ranges();
 
         CreateRenderer(static_cast<csmUint32>(w), static_cast<csmUint32>(h));
+
+        {
+            // 表情：逐条加载并保留 motion 对象（autoDelete=false，指针由本类持有，
+            // 析构时统一释放）。名字取文件名去掉 .exp3.json 的部分，即 exp_xxx。
+            for (csmInt32 i = 0; i < setting.GetExpressionCount(); ++i) {
+                const csmChar* file = setting.GetExpressionFileName(i);
+                if (!file || file[0] == '\0') continue;
+                const CubismRuntime::FileBytes bytes = CubismRuntime::read_file(dir_ + file);
+                if (!bytes.ok()) {
+                    cubism_log("[cubism] 表情载入失败: %s\n", file);
+                    continue;
+                }
+                std::string name = file;
+                const size_t ext = name.find(".exp3");
+                if (ext != std::string::npos) name = name.substr(0, ext);
+                ACubismMotion* motion = LoadExpression(
+                    bytes.data.data(), static_cast<csmSizeInt>(bytes.data.size()), name.c_str());
+                if (motion) expressions_.push_back(ExpressionEntry{name, motion});
+            }
+            cubism_log("[cubism] 表情 %d 个\n", static_cast<int>(expressions_.size()));
+        }
 
         for (csmInt32 i = 0; i < setting.GetTextureCount(); ++i) {
             const csmChar* name = setting.GetTextureFileName(i);
@@ -86,6 +118,37 @@ public:
 
         GetModel()->SaveParameters();
         return true;
+    }
+
+    // ---- 表情 ----
+    // 表情是一组"参数覆盖"，必须在本帧 model()->Update() 之前施加，
+    // 否则参数改了也不会反映到顶点（Update 才把参数烘进顶点）。
+    int expression_count() const { return static_cast<int>(expressions_.size()); }
+
+    std::string expression_name(int index) const {
+        return (index >= 0 && index < static_cast<int>(expressions_.size()))
+            ? expressions_[index].name
+            : std::string();
+    }
+
+    int current_expression() const { return current_expression_; }
+
+    void set_expression(int index) {
+        if (!_expressionManager || !GetModel()) return;
+        _expressionManager->StopAllMotions();
+        current_expression_ = -1;
+        if (index >= 0 && index < static_cast<int>(expressions_.size())) {
+            // autoDelete=false：motion 对象由本类持有并在析构时释放，
+            // 交给队列删除的话再切回来就是悬空指针
+            _expressionManager->StartMotion(expressions_[index].motion, false);
+            current_expression_ = index;
+        }
+    }
+
+    void apply_expression(float dt_seconds) {
+        if (_expressionManager && GetModel()) {
+            _expressionManager->UpdateMotion(GetModel(), dt_seconds);
+        }
     }
 
     void apply_params(const std::vector<core::CubismParamValue>& params) {
@@ -270,6 +333,11 @@ public:
     }
 
 private:
+    struct ExpressionEntry {
+        std::string name;
+        ACubismMotion* motion = nullptr;
+    };
+
     static unsigned int upload_texture(const std::string& path) {
         QImage img(QString::fromLocal8Bit(path.c_str()));
         if (img.isNull()) return 0;
@@ -289,6 +357,8 @@ private:
 
     std::string dir_;
     std::vector<unsigned int> textures_;
+    std::vector<ExpressionEntry> expressions_;
+    int current_expression_ = -1;
     csmMap<csmString, csmFloat32> layout_; // 布局信息：每帧据此重建模型矩阵
     // 顶点包围盒（加载时统计）
     float bounds_min_x_ = -0.5f;
@@ -448,6 +518,8 @@ bool CubismAvatarRenderer::initialize_with_current_context(const Live2dModelInfo
 void CubismAvatarRenderer::render_once(const lb::core::SemanticParams& sem) {
     if (!ready_ || !fbo_) return;
     apply_params(sem);
+    // 表情是参数覆盖，必须在 Update() 之前施加（Update 才把参数烘进顶点）
+    if (runtime_) runtime_->apply_expression(expression_dt());
     if (runtime_->model()) runtime_->model()->Update();
     render_frame();
     const QImage frame = fbo_->toImage().convertToFormat(QImage::Format_ARGB32);
@@ -638,6 +710,7 @@ void CubismAvatarRenderer::tick(const lb::core::SemanticParams& sem) {
     if (!context_->makeCurrent(surface_.get())) return;
 
     apply_params(sem);
+    if (runtime_) runtime_->apply_expression(expression_dt());
     if (runtime_->model()) runtime_->model()->Update();
     render_frame();
 
@@ -668,6 +741,39 @@ void CubismAvatarRenderer::render(QImage& target, const lb::core::SemanticParams
 }
 
 QString CubismAvatarRenderer::name() const { return QStringLiteral("Cubism"); }
+
+// ---- 表情 ----
+
+float CubismAvatarRenderer::expression_dt() {
+    const auto now = std::chrono::steady_clock::now();
+    double dt = 1.0 / 60.0;
+    if (last_expression_ts_.time_since_epoch().count() != 0) {
+        dt = std::chrono::duration<double>(now - last_expression_ts_).count();
+    }
+    last_expression_ts_ = now;
+    return static_cast<float>(std::clamp(dt, 0.001, 0.2));
+}
+
+void CubismAvatarRenderer::set_expression(int index) {
+    if (runtime_) runtime_->set_expression(index);
+    cubism_log("[表情] 切换到 %d\n", index);
+}
+
+int CubismAvatarRenderer::current_expression() const {
+    return runtime_ ? runtime_->current_expression() : -1;
+}
+
+std::vector<QString> CubismAvatarRenderer::expression_names() const {
+    std::vector<QString> out;
+    if (runtime_) {
+        const int n = runtime_->expression_count();
+        out.reserve(static_cast<size_t>(n));
+        for (int i = 0; i < n; ++i) {
+            out.push_back(QString::fromStdString(runtime_->expression_name(i)));
+        }
+    }
+    return out;
+}
 
 bool CubismAvatarRenderer::model_bound() const { return ready_; }
 

@@ -2,10 +2,12 @@
 
 #include <QImage>
 #include <QOpenGLWidget>
+#include <QString>
 
 #include <chrono>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include "lb/core/semantic_params.h"
 #include "lb/core/smoothing.h"
@@ -46,6 +48,9 @@ public:
     void set_motion_gain(float g);
     // 表情幅度（眼睛开合/眉毛/嘴部表情的倍率）
     void set_face_gain(float g);
+    // 模型自带表情（exp_xxx）：index < 0 表示无表情
+    void set_expression(int index);
+    std::vector<QString> expression_names() const;
 
 signals:
     void initialized(bool ok);

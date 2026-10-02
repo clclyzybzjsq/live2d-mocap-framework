@@ -1,7 +1,9 @@
 #pragma once
 
 #include <QImage>
+#include <QString>
 
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -57,6 +59,13 @@ public:
     void set_motion_gain(float g);
     // 表情幅度：眼睛开合/眉毛/嘴部表情的整体倍率（1.0 为原始幅度）
     void set_face_gain(float g);
+
+    // ---- 表情（模型自带的 exp_xxx）----
+    // 切换当前表情；index < 0 表示无表情。表情是一组参数覆盖，
+    // 在每帧 model()->Update() 之前施加，因此会盖过动捕驱动的那几个参数。
+    void set_expression(int index);
+    int current_expression() const;
+    std::vector<QString> expression_names() const;
     void set_zoom(float z);
     // 模型显示位置偏移（归一化，0 为中心）
     void set_offset(float x, float y);
@@ -67,6 +76,8 @@ private:
     void release_gl();
     void apply_params(const lb::core::SemanticParams& sem);
     void render_frame();
+    // 表情淡入用的帧间隔（秒），并夹住异常值
+    float expression_dt();
 
     std::unique_ptr<QOpenGLContext> context_;
     std::unique_ptr<QOffscreenSurface> surface_;
@@ -79,6 +90,7 @@ private:
     mutable std::mutex mutex_;
     QImage front_; // 最近一次渲染结果（供 render() 读取）
     long frames_rendered_ = 0; // 诊断：已渲染帧数
+    std::chrono::steady_clock::time_point last_expression_ts_{};
 
     int width_ = 640;
     int height_ = 480;

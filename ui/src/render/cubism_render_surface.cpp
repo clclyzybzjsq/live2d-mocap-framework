@@ -61,6 +61,15 @@ void CubismRenderSurface::set_face_gain(float g) {
     if (renderer_) renderer_->set_face_gain(g);
 }
 
+void CubismRenderSurface::set_expression(int index) {
+    if (renderer_) renderer_->set_expression(index);
+    update(); // 表情切换立刻重画一帧，否则要等下一个渲染节拍
+}
+
+std::vector<QString> CubismRenderSurface::expression_names() const {
+    return renderer_ ? renderer_->expression_names() : std::vector<QString>{};
+}
+
 QImage CubismRenderSurface::frame() const {
     if (!renderer_) return QImage();
     return renderer_->current_frame();
