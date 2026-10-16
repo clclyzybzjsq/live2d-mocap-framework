@@ -1,6 +1,7 @@
 #include "models_page.h"
 
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QGroupBox>
@@ -167,9 +168,15 @@ ModelsPage::ModelsPage(QWidget* parent) : QWidget(parent) {
     QSettings settings;
     QString dir = settings.value(QLatin1String(kSettingsDir)).toString();
     if (dir.isEmpty()) {
-        // 环境变量指定的默认目录
+        // 环境变量优先；其次用 exe 同级的 models\（分发版把模型放在这里，
+        // 拷到任何路径都不用手动选目录）
         const QByteArray env = qgetenv("LB_MODELS_DIR");
-        if (!env.isEmpty()) dir = QString::fromLocal8Bit(env);
+        if (!env.isEmpty()) {
+            dir = QString::fromLocal8Bit(env);
+        } else {
+            const QString beside = QCoreApplication::applicationDirPath() + QStringLiteral("/models");
+            if (QFileInfo::exists(beside)) dir = beside;
+        }
     }
     if (!dir.isEmpty() && QFileInfo::exists(dir)) {
         model_dir_ = dir;

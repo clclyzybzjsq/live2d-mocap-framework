@@ -3,6 +3,7 @@
 #include <QApplication>
 #include <cstring>
 #include <QDebug>
+#include <QDir>
 #include "render/cubism_runtime.h" // cubism_log
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -549,7 +550,14 @@ void MainWindow::set_running(bool running) {
     lb::core::PipelineConfig cfg;
     cfg.device_id = mocap_page_->device_id().toStdString();
     cfg.capture = mocap_page_->capture_config();
-    cfg.inference.model_dir = env_or("LB_MODEL_DIR", "D:/ournotes_vtube/inference/models");
+    // 推理模型目录：环境变量 > exe 同级 inference\models > 开发机默认。
+    // 分发版把模型放在 exe 旁边，换台机器拷过去即可用。
+    {
+        const QString env = qEnvironmentVariable("LB_MODEL_DIR");
+        const QString beside = QCoreApplication::applicationDirPath() + QStringLiteral("/inference/models");
+        cfg.inference.model_dir = (!env.isEmpty() ? env : (QDir(beside).exists()
+            ? beside : QStringLiteral("D:/ournotes_vtube/inference/models"))).toStdString();
+    }
     cfg.smoothing.smoothing = mocap_page_->smoothing();
 
     if (!pipeline_->initialize(cfg)) {

@@ -18,6 +18,38 @@ std::string env_or(const char* key, const std::string& fallback) {
     return (v && *v) ? std::string(v) : fallback;
 }
 
+// exe 所在目录（含结尾反斜杠）。分发版按"先找 exe 同级目录"来定位边车，
+// 这样拷到任何路径都能跑，不依赖开发机上的绝对路径。
+std::string exe_dir() {
+    char buf[MAX_PATH * 2] = {};
+    const DWORD n = GetModuleFileNameA(nullptr, buf, sizeof(buf));
+    if (n == 0 || n >= sizeof(buf)) return std::string();
+    std::string path(buf, n);
+    const size_t slash = path.find_last_of("\\/");
+    return (slash == std::string::npos) ? std::string() : path.substr(0, slash + 1);
+}
+
+std::string file_exists(const std::string& p) {
+    const DWORD attr = GetFileAttributesA(p.c_str());
+    return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY)) ? p
+                                                                                  : std::string();
+}
+
+// 按优先级挑第一个存在的候选路径
+std::string first_existing(std::initializer_list<std::string> candidates) {
+    for (const std::string& c : candidates) {
+        if (!c.empty() && !file_exists(c).empty()) return c;
+    }
+    return std::string();
+}
+
+// 在 PATH 上查找可执行文件（用户按常规方式安装 Python 时靠它找到解释器）
+std::string find_on_path(const char* exe_name) {
+    char buf[MAX_PATH * 2] = {};
+    const DWORD n = SearchPathA(nullptr, exe_name, nullptr, sizeof(buf), buf, nullptr);
+    return (n > 0 && n < sizeof(buf)) ? std::string(buf) : std::string();
+}
+
 } // namespace
 
 WinFaceTracker::~WinFaceTracker() {
@@ -27,10 +59,30 @@ WinFaceTracker::~WinFaceTracker() {
 bool WinFaceTracker::initialize(const lb::core::InferenceConfig& config) {
     shutdown();
 
-    const std::string python = env_or("LB_SIDECAR_PYTHON",
-        "D:\\deps\\venv\\Scripts\\python.exe");
-    const std::string script = env_or("LB_SIDECAR_SCRIPT",
-        "D:\\ournotes_vtube\\inference\\tracker_server.py");
+    const std::string exe = exe_dir();
+    // 解释器查找顺序：
+    //   环境变量 > exe 同级 python\python.exe（便携环境）> PATH 上的 python.exe > 开发机默认
+    const std::string python = first_existing({
+        env_or("LB_SIDECAR_PYTHON", std::string()),
+        exe + "python\\python.exe",
+        find_on_path("python.exe"),
+        "D:\\deps\\venv\\Scripts\\python.exe",
+    });
+    // 边车脚本：环境变量 > exe 同级 inference\tracker_server.py > 开发机默认
+    const std::string script = first_existing({
+        env_or("LB_SIDECAR_SCRIPT", std::string()),
+        exe + "inference\\tracker_server.py",
+        "D:\\ournotes_vtube\\inference\\tracker_server.py",
+    });
+    if (python.empty() || script.empty()) {
+        // 让上层能给出可读的原因，而不是"启动了但一直没有结果"
+        std::fprintf(stderr,
+                     "lb_win: 找不到推理边车（python=%s script=%s）。"
+                     "可用 LB_SIDECAR_PYTHON / LB_SIDECAR_SCRIPT 指定。\n",
+                     python.empty() ? "(未找到)" : python.c_str(),
+                     script.empty() ? "(未找到)" : script.c_str());
+        return false;
+    }
 
     map_handle_ = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                      0, lb::ipc::kSharedTotal, shm_name_.c_str());
