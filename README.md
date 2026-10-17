@@ -58,6 +58,9 @@ models.
 - No forward/back torso lean and no torso twist around the vertical axis. A single camera
   cannot measure them reliably, and a naive mapping makes the upper body swing along with
   the head.
+- **Tracking is only stable when the person sits roughly 30–50 cm or further from the
+  camera.** At closer distances the shoulder landmarks are estimated poorly and the torso
+  left/right sway is computed incorrectly.
 - Mocap runs at roughly 15 fps (dominated by the face model inference). Rendering runs at
   60 fps and interpolates between mocap samples, so motion looks continuous while the
   underlying data rate stays at ~15 Hz.
@@ -148,6 +151,8 @@ Cubism Core 的 DLL、着色器、边车脚本以及两个 MediaPipe 模型文�
 
 - 手部与手指追踪未实现。肘、腕的 pose 关键点已经在传，缺的只是到模型参数的映射。
 - 躯干前后倾、以及绕纵轴的扭转未实现。单目摄像头测不准这两项，硬接会跟着头一起甩。
+- **人体需要距摄像头约 30 ~ 50 厘米或更远才能稳定追踪。** 距离更近时肩部关键点估计不准，
+  躯干的左右摇摆会被错误地解析。
 - 动捕帧率约 15 fps（主要耗在人脸模型推理上），渲染 60 fps 并在动捕样本之间插值，
   所以观感是连续的，但底层数据率仍是约 15 Hz。
 - 模型自带的物理、呼吸与待机动作不由本程序驱动。
