@@ -29,3 +29,6 @@ inference/models/
 third_party/
 # cubism generated import lib / def
 cubism_link/
+
+# local distribution folder (models included, never commit)
+distribu/
